@@ -3,7 +3,7 @@ package main
 import "net/http"
 
 // Version can be overridden at build time via -ldflags "-X main.Version=x.y.z".
-var Version = "0.2.4"
+var Version = "0.2.5"
 
 type ChangelogEntry struct {
 	Version string   `json:"version"`
@@ -13,6 +13,17 @@ type ChangelogEntry struct {
 }
 
 var changelog = []ChangelogEntry{
+	{
+		Version: "0.2.5",
+		Date:    "2026-11-21",
+		Title:   "Per-Thread Workers, Scoped Files, Media Players & Export",
+		Items: []string{
+			"Made active thread client-local and added per-thread agent workers",
+			"Scoped /api/file to uploaded or message-attached files only",
+			"Added hourly orphan upload reaper and inline audio/video players",
+			"Added graceful SIGINT/SIGTERM shutdown and /export (md, json, txt)",
+		},
+	},
 	{
 		Version: "0.2.4",
 		Date:    "2026-11-21",
