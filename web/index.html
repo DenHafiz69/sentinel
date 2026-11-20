@@ -673,7 +673,8 @@ function showThreadMenu(t, btn){
 function threadRow(t){
   const d=document.createElement('div');
   d.className='thread'+(t.id===S.active?' active':'');
-  d.innerHTML='<div class="thread-main"><div class="tt">'+(t.pinned?'<span class="pin-ic">📌</span>':'')+'<span>'+esc(t.title)+'</span></div><div class="ts">'+ago(t.lastTime||t.created)+'</div></div>'+
+  const isBusy = S.running && t.id===S.runningThread;
+  d.innerHTML='<div class="thread-main"><div class="tt">'+(isBusy?'<span class="act-dot" style="flex-shrink:0"></span>':'')+(t.pinned?'<span class="pin-ic">📌</span>':'')+'<span>'+esc(t.title)+'</span></div><div class="ts">'+ago(t.lastTime||t.created)+'</div></div>'+
     '<button class="thread-act" title="Thread actions" aria-label="Thread actions">⋯</button>';
   d.onclick=()=>{ api('/api/active',{id:t.id}); if(isNarrow()) setSidebar(false); };
   d.querySelector('.thread-act').onclick=(e)=>{ e.stopPropagation(); showThreadMenu(t, e.currentTarget); };
@@ -776,11 +777,13 @@ function onStatus(d){
   S.running=!!d.running; S.runningThread=d.thread; S.runningMsgId=d.msgId||0; S.queued=d.queued||0;
   if(!S.running) S.activities=[];
   if(!wasRunning&&S.running) elapsedStart=Date.now();
+  renderThreads();
   renderActivityPanel();
   updateStatus();
 }
 function updateStatus(){
   const st=$('#status'), stop=$('#stopbtn');
+  const activeRunning = S.running && S.runningThread === S.active;
   if(sseState==='expired'){
     st.textContent='session expired — reload to sign in';
     st.classList.remove('busy');
@@ -791,12 +794,13 @@ function updateStatus(){
   if(sseState==='reconnecting'){
     st.textContent='reconnecting…';
     st.classList.add('busy');
-    stop.hidden=!S.running;
+    stop.hidden=!activeRunning;
     return;
   }
-  if(S.running){
+  if(activeRunning){
     st.textContent='thinking…'+(S.queued>0?' ('+S.queued+' queued)':'');
     st.classList.add('busy');
+    $('#elapsed').textContent=Math.floor((Date.now()-elapsedStart)/1000)+'s';
     stop.hidden=false;
   } else {
     st.textContent='online'; st.classList.remove('busy');
@@ -804,7 +808,7 @@ function updateStatus(){
   }
 }
 setInterval(()=>{
-  if(S.running){
+  if(S.running && S.runningThread === S.active){
     $('#elapsed').textContent=Math.floor((Date.now()-elapsedStart)/1000)+'s';
     if(actExpanded) renderActivityPanel();
   }
