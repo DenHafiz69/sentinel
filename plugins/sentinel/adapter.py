@@ -9,7 +9,8 @@ failure notices) into a Sentinel thread as a real chat message.
 Transport: ``POST {SENTINEL_URL}/api/inject`` with the shared secret from
 ``~/.config/sentinel/inject.token`` (Sentinel generates it on first run, 0600).
 Sentinel appends the message to the thread and broadcasts it on ``/api/events``,
-so an open browser tab shows it immediately.
+so an open browser tab shows it immediately. Stdlib only (urllib): no
+dependency probe that could block the platform from being enabled.
 
 Addressing: ``deliver=sentinel:t3`` targets Sentinel thread ``t3`` (the id from
 the sidebar, ``/api/state`` -> ``threads[].id``). ``deliver=sentinel`` uses
@@ -18,18 +19,14 @@ the sidebar, ``/api/state`` -> ``threads[].id``). ``deliver=sentinel`` uses
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Optional
-
-try:
-    import aiohttp
-    AIOHTTP_AVAILABLE = True
-except ImportError:  # pragma: no cover - Hermes ships aiohttp
-    AIOHTTP_AVAILABLE = False
-    aiohttp = None  # type: ignore[assignment]
 
 from gateway.config import Platform, PlatformConfig
 from gateway.platforms.base import BasePlatformAdapter, SendResult
@@ -68,27 +65,50 @@ def _home_thread(extra: dict[str, Any]) -> str:
     return str(extra.get("home_channel") or get_scoped_secret("SENTINEL_HOME_CHANNEL", "") or "").strip()
 
 
+def _error_body(err: urllib.error.HTTPError) -> str:
+    try:
+        return err.read().decode("utf-8", "replace")[:200]
+    except Exception:  # body already consumed / not readable
+        return ""
+
+
+def _post(url: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Blocking delivery POST. Returns ``{"ok": True, ...}`` or ``{"error": str}``."""
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(  # noqa: S310 - fixed loopback base URL, never user-supplied
+        f"{url}/api/inject",
+        data=data,
+        method="POST",
+        headers={"Content-Type": "application/json", "X-Sentinel-Token": token},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=SEND_TIMEOUT) as resp:  # noqa: S310
+            body = resp.read().decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        # 401 = token mismatch, 404 = thread gone, 403 = loopback/proxy guard
+        return {"error": f"sentinel HTTP {e.code}: {_error_body(e)}"}
+    except Exception as e:  # connection refused, DNS, timeout
+        return {"error": f"sentinel unreachable at {url}: {e}"}
+    try:
+        parsed = json.loads(body)
+    except ValueError:
+        return {"ok": True}
+    return {"ok": True, "msg_id": parsed.get("msgId"), "thread": parsed.get("thread")}
+
+
 async def _post_inject(url: str, token: str, payload: dict[str, Any]) -> dict[str, Any]:
     """POST one delivery. Returns ``{"ok": True, "msg_id": ...}`` or ``{"error": str}``."""
     if not token:
         return {"error": f"sentinel: no inject token (looked for {DEFAULT_TOKEN_FILE})"}
-    if not AIOHTTP_AVAILABLE:
-        return {"error": "sentinel: aiohttp is not installed"}
-    headers = {"X-Sentinel-Token": token, "Content-Type": "application/json"}
+    return await asyncio.to_thread(_post, url, token, payload)
+
+
+def _probe(url: str) -> bool:
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=SEND_TIMEOUT)) as session:
-            async with session.post(f"{url}/api/inject", json=payload, headers=headers) as resp:
-                body = await resp.text()
-                if resp.status != 200:
-                    # 401 = token mismatch, 404 = thread gone, 403 = refused source
-                    return {"error": f"sentinel HTTP {resp.status}: {body[:200]}"}
-                try:
-                    data = json.loads(body)
-                except ValueError:
-                    return {"ok": True}
-                return {"ok": True, "msg_id": data.get("msgId"), "thread": data.get("thread")}
-    except Exception as e:  # network / DNS / timeout
-        return {"error": f"sentinel unreachable at {url}: {e}"}
+        with urllib.request.urlopen(f"{url}/healthz", timeout=PROBE_TIMEOUT) as resp:  # noqa: S310
+            return resp.status == 200
+    except Exception:
+        return False
 
 
 def _payload(chat_id: str, content: str, metadata: Optional[dict[str, Any]]) -> dict[str, Any]:
@@ -117,22 +137,12 @@ class SentinelAdapter(BasePlatformAdapter):
     # -- lifecycle ---------------------------------------------------------
     async def connect(self, *, is_reconnect: bool = False) -> bool:
         """Probe Sentinel's /healthz. Delivery is outbound only: nothing to subscribe to."""
-        if not AIOHTTP_AVAILABLE:
-            logger.warning("[%s] aiohttp missing — cannot deliver", self.name)
-            return False
         if not self._token:
             logger.warning(
                 "[%s] no inject token at %s — deliveries will fail until Sentinel has started once",
                 self.name, _token_path(self._extra))
-        try:
-            timeout = aiohttp.ClientTimeout(total=PROBE_TIMEOUT)
-            async with aiohttp.ClientSession(timeout=timeout) as session:
-                async with session.get(f"{self._url}/healthz") as resp:
-                    ok = resp.status == 200
-        except Exception as e:
-            logger.warning("[%s] Sentinel not reachable at %s: %s", self.name, self._url, e)
-            ok = False
-        if not ok:
+        if not await asyncio.to_thread(_probe, self._url):
+            logger.warning("[%s] Sentinel not reachable at %s", self.name, self._url)
             return False
         self._mark_connected()
         logger.info("[%s] connected to %s (delivery only, home thread %s)",
@@ -162,17 +172,16 @@ class SentinelAdapter(BasePlatformAdapter):
 
 
 def check_requirements() -> bool:
-    """Passive probe: no dependencies beyond the gateway's own aiohttp."""
-    return AIOHTTP_AVAILABLE
+    """Passive probe: stdlib only, nothing to install."""
+    return True
 
 
 def validate_config(config: PlatformConfig) -> bool:
-    extra = dict(getattr(config, "extra", {}) or {})
-    return bool(_base_url(extra))
+    return bool(_base_url(dict(getattr(config, "extra", {}) or {})))
 
 
 def is_configured(config: PlatformConfig) -> bool:
-    """Configured = Sentinel answers /healthz (used only for env-only activation)."""
+    """Configured = a URL plus an inject token (used only for env-only activation)."""
     extra = dict(getattr(config, "extra", {}) or {})
     return bool(_base_url(extra)) and bool(_inject_token(extra))
 
