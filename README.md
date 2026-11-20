@@ -23,6 +23,8 @@ One static Go binary, no database, no frontend build step, no Node.
   Trust team allows). The origin also validates the Access JWT itself and fails
   closed, so a misconfigured or missing Access app can never silently expose the
   chat
+- `/update` in the composer: pulls, runs the whole quality gate, swaps the
+  binary and restarts the service, then the tab reconnects by itself
 
 ## How it works
 
@@ -50,6 +52,25 @@ browser ──HTTPS── Cloudflare edge (Access login + JWT)
   served through `os.Root` scoped to your home, one data mount and `/tmp`, so
   traversal and symlink escapes are blocked by the kernel, not by string checks.
 
+## Updating from the chat
+
+`/update` runs the whole deploy loop on the host that runs Sentinel:
+
+1. `git fetch`, then `git merge --ff-only origin/<branch>`. It refuses on a
+   detached HEAD or a checkout with uncommitted tracked changes, so it can never
+   rewrite local work.
+2. Quality gate: `gofmt -l`, `go vet`, `go test`, `staticcheck`, `gosec`.
+3. `go build` into `bin/webchat.new`; the file is renamed over `bin/webchat`
+   only after every gate passed, so a failed build never leaves a broken binary.
+4. Restart through `systemd-run --user`, so the restart job lives outside
+   Sentinel's own cgroup and survives the stop it triggers. If nothing changed
+   but a source file is newer than the binary, it rebuilds and restarts; if the
+   tree is already current it just says so.
+
+The checkout is resolved from the running binary (`<repo>/bin/webchat`), so an
+update can only ever touch the tree Sentinel was built from. Failures are
+written into the thread as error messages; the old process keeps serving.
+
 ## Setup
 
 Prerequisites: Go 1.24+ (uses `os.Root`), the `hermes` CLI installed and
@@ -69,6 +90,7 @@ Configuration via environment:
 | `CF_ACCESS_TEAM` | Zero Trust team name for JWT validation | none, required in prod |
 | `CF_AUD` | Access application AUD tag (Cloudflare generates a hex tag per app, it is not the domain) | none, required in prod |
 | `WEBCCHAT_DEV` | `1` disables the Access JWT gate. Never enable while exposed | unset |
+| `SENTINEL_UNIT` | systemd user unit that `/update` restarts | `hermes-webchat` |
 
 Sample deployment files are in `deploy/`:
 - `sentinel.service` — systemd user unit
