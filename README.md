@@ -52,6 +52,36 @@ browser ──HTTPS── Cloudflare edge (Access login + JWT)
   served through `os.Root` scoped to your home, one data mount and `/tmp`, so
   traversal and symlink escapes are blocked by the kernel, not by string checks.
 
+## Gateway delivery (cron results in a thread)
+
+Sentinel is a delivery sink for the Hermes gateway, so scheduled work can land
+here instead of only in Telegram. The gateway's `sentinel` platform plugin
+(`plugins/sentinel/`, installed as `~/.hermes/plugins/sentinel`) posts to:
+
+```
+POST /api/inject          X-Sentinel-Token: <secret>
+{"thread": "t3", "text": "...", "role": "assistant", "title": "Disk digest"}
+```
+
+Sentinel appends the message to that thread, broadcasts it on `/api/events`, and
+any open tab renders it like a normal reply. A job is addressed with a thread id:
+
+```bash
+hermes cron edit <job_id> --deliver "telegram:244300056,sentinel:t3"
+```
+
+Guard rails, because this endpoint is necessarily outside the Access gate:
+
+- loopback `RemoteAddr` only, and any request carrying `Cf-Connecting-Ip`,
+  `Cf-Ray`, `X-Forwarded-For` or `X-Real-Ip` is refused, so the public hostname
+  cannot reach it even though cloudflared dials 127.0.0.1;
+- a 32-byte shared secret, auto-generated at `~/.config/sentinel/inject.token`
+  (0600) on first run, compared in constant time;
+- it never starts an agent run: content is appended verbatim, so a delivery
+  cannot be turned into an instruction that the agent executes.
+
+Thread ids are the `threads[].id` values from `/api/state` (`t1`, `t2`, ...).
+
 ## Updating from the chat
 
 `/update` runs the whole deploy loop on the host that runs Sentinel:
@@ -91,6 +121,8 @@ Configuration via environment:
 | `CF_AUD` | Access application AUD tag (Cloudflare generates a hex tag per app, it is not the domain) | none, required in prod |
 | `WEBCCHAT_DEV` | `1` disables the Access JWT gate. Never enable while exposed | unset |
 | `SENTINEL_UNIT` | systemd user unit that `/update` restarts | `hermes-webchat` |
+| `SENTINEL_INJECT_TOKEN` | shared secret for `POST /api/inject`; overrides the token file | unset |
+| `SENTINEL_TOKEN_FILE` | where the inject token lives | `~/.config/sentinel/inject.token` |
 
 Sample deployment files are in `deploy/`:
 - `sentinel.service` — systemd user unit

@@ -1,0 +1,25 @@
+name: sentinel
+label: Sentinel
+kind: platform
+version: 1.0.0
+description: >
+  Delivery-only gateway platform for Sentinel, the Hermes web chat at
+  chat.denhafiz.my. Pushes gateway output (cron results, notifications) into a
+  Sentinel thread as a real chat message over Sentinel's loopback
+  POST /api/inject endpoint; the browser picks it up over SSE. Chat still runs
+  through Sentinel's own `hermes chat` worker, so this platform is outbound
+  only.
+author: Sofia (Hermes Agent)
+optional_env:
+  - name: SENTINEL_URL
+    description: "Sentinel base URL (default http://127.0.0.1:9121)"
+    prompt: "Sentinel URL"
+    password: false
+  - name: SENTINEL_TOKEN_FILE
+    description: "Path to the inject shared secret (default ~/.config/sentinel/inject.token)"
+    prompt: "Inject token file"
+    password: false
+  - name: SENTINEL_HOME_CHANNEL
+    description: "Default Sentinel thread id for cron delivery (deliver='sentinel')"
+    prompt: "Home thread id"
+    password: false

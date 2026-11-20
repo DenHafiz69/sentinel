@@ -54,6 +54,8 @@ type Server struct {
 	dev       bool
 	uploadDir string
 
+	injectToken string // shared secret for POST /api/inject ("" disables it)
+
 	jobs chan Job
 
 	mu            sync.Mutex
@@ -784,13 +786,21 @@ func main() {
 		store.NewThread()
 	}
 
+	injectToken, err := loadInjectToken()
+	if err != nil {
+		// Keep serving chat; only gateway delivery is lost.
+		log.Printf("sentinel: inject token unavailable, POST /api/inject disabled: %v", err)
+		injectToken = ""
+	}
+
 	srv := &Server{
-		store:     store,
-		hub:       NewHub(),
-		auth:      NewAccessAuth(team, aud),
-		dev:       dev,
-		uploadDir: uploadDir,
-		jobs:      make(chan Job, 16),
+		store:       store,
+		hub:         NewHub(),
+		auth:        NewAccessAuth(team, aud),
+		dev:         dev,
+		uploadDir:   uploadDir,
+		injectToken: injectToken,
+		jobs:        make(chan Job, 16),
 	}
 	go srv.worker()
 
@@ -823,6 +833,9 @@ func main() {
 	mux.HandleFunc("POST /api/update", srv.authed(srv.handleUpdate))
 	mux.HandleFunc("POST /api/upload", srv.authed(srv.handleUpload))
 	mux.HandleFunc("GET /api/file", srv.authed(srv.handleFile))
+
+	// Gateway delivery: loopback + shared secret, deliberately outside Access.
+	mux.HandleFunc("POST /api/inject", srv.injectGuard(srv.handleInject))
 
 	hs := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	// #nosec G706 — addr/team/aud come from this service's own systemd

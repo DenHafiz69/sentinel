@@ -3,7 +3,7 @@ package main
 import "net/http"
 
 // Version can be overridden at build time via -ldflags "-X main.Version=x.y.z".
-var Version = "0.2.1"
+var Version = "0.2.2"
 
 type ChangelogEntry struct {
 	Version string   `json:"version"`
@@ -13,6 +13,18 @@ type ChangelogEntry struct {
 }
 
 var changelog = []ChangelogEntry{
+	{
+		Version: "0.2.2",
+		Date:    "2026-11-21",
+		Title:   "Gateway Delivery",
+		Items: []string{
+			"Added POST /api/inject so the Hermes gateway can push cron results and notifications into a thread as real chat messages",
+			"Deliveries appear live over SSE and rename an unnamed thread from the job title",
+			"Added a loopback-only, shared-secret guard that also refuses any request carrying Cloudflare or proxy headers, so the public hostname cannot reach the endpoint",
+			"The inject token is generated on first run at ~/.config/sentinel/inject.token (0600)",
+			"Added the sentinel gateway platform plugin (plugins/sentinel) for `deliver=sentinel:<thread>`",
+		},
+	},
 	{
 		Version: "0.2.1",
 		Date:    "2026-11-21",

@@ -376,6 +376,35 @@ func (s *Store) AddError(threadID string, text string) Message {
 	return s.AddNotice(threadID, "error", text)
 }
 
+// AddDelivered appends a message pushed in by the gateway (cron output and
+// notification deliveries). Unlike AddNotice it never falls back to the active
+// thread: a delivery addressed to a thread that no longer exists must fail
+// loudly so the sender sees it, not land somewhere unrelated. An empty threadID
+// means the active thread, and title names a still-unnamed thread.
+func (s *Store) AddDelivered(threadID, role, text, title string) (Message, string, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if threadID == "" {
+		threadID = s.active
+	}
+	t := s.find(threadID)
+	if t == nil {
+		return Message{}, "", false
+	}
+	id := s.nextMsg
+	s.nextMsg++
+	m := Message{ID: id, Role: role, Text: text, Time: nowSec()}
+	t.Messages = append(t.Messages, m)
+	if title != "" && t.Title == "New chat" {
+		t.Title = title
+	}
+	if len(t.Messages) > 500 {
+		t.Messages = t.Messages[len(t.Messages)-500:]
+	}
+	s.saveLocked()
+	return m, t.ID, true
+}
+
 func (s *Store) RenameThread(id, title string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
