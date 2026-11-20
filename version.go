@@ -3,7 +3,7 @@ package main
 import "net/http"
 
 // Version can be overridden at build time via -ldflags "-X main.Version=x.y.z".
-var Version = "0.2.2"
+var Version = "0.2.3"
 
 type ChangelogEntry struct {
 	Version string   `json:"version"`
@@ -13,6 +13,19 @@ type ChangelogEntry struct {
 }
 
 var changelog = []ChangelogEntry{
+	{
+		Version: "0.2.3",
+		Date:    "2026-11-21",
+		Title:   "Mobile Responsiveness",
+		Items: []string{
+			"Touch layout: 44px targets on every primary control, 16px inputs so iOS does not zoom on focus",
+			"Sidebar becomes an off-canvas drawer under 860px, with edge-swipe to open and swipe-left to close",
+			"App height follows the visual viewport, so the composer stays above the Android keyboard",
+			"Modals become full-screen sheets on phones, with contained overscroll",
+			"Landscape block for phones held sideways: tighter header, composer and activity list",
+			"aria-labels on icon buttons, press states on tappable rows, drag-and-drop disabled on touch",
+		},
+	},
 	{
 		Version: "0.2.2",
 		Date:    "2026-11-21",
