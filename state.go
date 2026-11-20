@@ -192,13 +192,21 @@ func (s *Store) SetActive(id string) bool {
 }
 
 func (s *Store) Snapshot() UISnap {
+	return s.SnapshotFor("")
+}
+
+func (s *Store) SnapshotFor(threadID string) UISnap {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	snap := UISnap{Active: s.active}
+	active := s.active
+	if threadID != "" && s.find(threadID) != nil {
+		active = threadID
+	}
+	snap := UISnap{Active: active}
 	for _, t := range s.threads {
 		snap.Threads = append(snap.Threads, lite(t))
 	}
-	if t := s.find(s.active); t != nil {
+	if t := s.find(active); t != nil {
 		msgs := t.Messages
 		if len(msgs) > 400 {
 			msgs = msgs[len(msgs)-400:]
@@ -206,6 +214,52 @@ func (s *Store) Snapshot() UISnap {
 		snap.Messages = append(snap.Messages, msgs...)
 	}
 	return snap
+}
+
+func (s *Store) ThreadByID(id string) (Thread, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == "" {
+		id = s.active
+	}
+	t := s.find(id)
+	if t == nil {
+		return Thread{}, false
+	}
+	cp := *t
+	cp.Messages = append([]Message(nil), t.Messages...)
+	return cp, true
+}
+
+func (s *Store) HasAttachment(cleanPath string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, t := range s.threads {
+		for _, m := range t.Messages {
+			for _, f := range m.Files {
+				if filepath.Clean(f.Path) == cleanPath {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+func (s *Store) ReferencedPaths() map[string]bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := map[string]bool{}
+	for _, t := range s.threads {
+		for _, m := range t.Messages {
+			for _, f := range m.Files {
+				if f.Path != "" {
+					out[filepath.Clean(f.Path)] = true
+				}
+			}
+		}
+	}
+	return out
 }
 
 func (s *Store) SessionName(threadID string) string {
@@ -299,9 +353,16 @@ func shortTitle(text string, files []Attachment) string {
 }
 
 func (s *Store) AddUser(text string, files []Attachment) (ThreadLite, Message) {
+	return s.AddUserTo("", text, files)
+}
+
+func (s *Store) AddUserTo(threadID, text string, files []Attachment) (ThreadLite, Message) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	t := s.find(s.active)
+	if threadID == "" {
+		threadID = s.active
+	}
+	t := s.find(threadID)
 	if t == nil {
 		l := s.newThreadLocked()
 		t = s.find(l.ID)

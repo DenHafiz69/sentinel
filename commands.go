@@ -19,6 +19,7 @@ var commandRegistry = []CommandSpec{
 	{Name: "/search", Usage: "/search [query]", Description: "Search conversation history", TakesArgs: true},
 	{Name: "/archive", Usage: "/archive", Description: "Archive current conversation"},
 	{Name: "/stop", Usage: "/stop", Description: "Stop active generation"},
+	{Name: "/export", Usage: "/export [md|json|txt]", Description: "Export current conversation", TakesArgs: true},
 	{Name: "/model", Usage: "/model [name]", Description: "View or change the model for this chat", TakesArgs: true},
 	{Name: "/update", Usage: "/update", Description: "Pull, rebuild and restart Sentinel"},
 	{Name: "/settings", Usage: "/settings", Description: "Open Sentinel settings & changelog"},

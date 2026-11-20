@@ -130,6 +130,8 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
 .tok-cmt{color:#676e95;font-style:italic}
 /* attachments */
 .att-img{display:block;max-width:300px;max-height:300px;border-radius:9px;margin:6px 0}
+.att-video{display:block;max-width:min(360px,100%);max-height:280px;border-radius:9px;margin:6px 0;background:#000}
+.att-audio{display:block;width:min(320px,100%);margin:6px 0}
 .att-file{display:flex;align-items:center;gap:9px;background:#0b0c0e;border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin:6px 0;color:var(--txt);text-decoration:none;max-width:320px}
 .att-file:hover{border-color:var(--accent)}
 .att-file .fname{flex:1;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -459,7 +461,8 @@ const isTouch = matchMedia('(hover:none) and (pointer:coarse)').matches;
 const hasKeyboard = !isTouch || matchMedia('(any-pointer:fine)').matches; // phones report no fine pointer; touch laptops still do
 const isNarrow = () => innerWidth <= 860;
 const msgs = $('#msgs');
-let S = {threads:[], active:null, running:false, runningThread:null, runningMsgId:0, activities:[], queued:0};
+let S = {threads:[], active:null, running:false, runningThread:null, runningThreads:{}, runningMsgId:0, activities:[], queued:0};
+let clientThread = localStorage.getItem('sentinel_thread') || '';
 let commands = [];
 let appVersion = '';
 let changelogData = [];
@@ -558,6 +561,8 @@ function filesHTML(files){
   return (files||[]).map(f=>{
     const url='/api/file?path='+encodeURIComponent(f.path);
     if(f.kind==='image') return '<a href="'+url+'" target="_blank" rel="noopener"><img class="att-img" loading="lazy" src="'+url+'" alt="'+esc(f.name)+'"></a>';
+    if(f.kind==='video') return '<video class="att-video" controls preload="metadata" src="'+url+'"></video><a class="att-file" href="'+url+'" download="'+esc(f.name)+'"><span>🎬</span><span class="fname">'+esc(f.name)+'</span><span class="fsize">'+fmtSize(f.size)+'</span></a>';
+    if(f.kind==='audio') return '<audio class="att-audio" controls preload="metadata" src="'+url+'"></audio>';
     return '<a class="att-file" href="'+url+'" download="'+esc(f.name)+'"><span>📄</span><span class="fname">'+esc(f.name)+'</span><span class="fsize">'+fmtSize(f.size)+'</span></a>';
   }).join('');
 }
@@ -649,16 +654,33 @@ function sortThreads(list){
 }
 let openMenu = null;
 function closeThreadMenu(){ if(openMenu){ openMenu.remove(); openMenu = null; } }
+function exportThread(id, format){
+  const tid = id || S.active;
+  const fmt = (format || 'md').toLowerCase();
+  if(!['md','json','txt'].includes(fmt)){ toast('Use format: md, json, or txt'); return; }
+  const a = document.createElement('a');
+  a.href = '/api/export?thread='+encodeURIComponent(tid)+'&format='+encodeURIComponent(fmt);
+  a.download = '';
+  a.click();
+}
+function switchThread(id){
+  if(!id) return;
+  clientThread = id;
+  localStorage.setItem('sentinel_thread', id);
+  fetch('/api/state?thread='+encodeURIComponent(id)).then(r=>r.json()).then(applySnap).catch(()=>{});
+}
 function showThreadMenu(t, btn){
   closeThreadMenu();
   const r = btn.getBoundingClientRect();
   const m = document.createElement('div');
   m.className = 'tmenu';
-  m.style.top = Math.min(r.bottom + 4, innerHeight - 170) + 'px';
+  m.style.top = Math.min(r.bottom + 4, innerHeight - 230) + 'px';
   m.style.left = Math.min(r.left - 110, innerWidth - 165) + 'px';
   const items = [
     [t.pinned ? 'Unpin' : 'Pin to top', () => api('/api/thread/pin', {id:t.id, pinned:!t.pinned})],
     ['Rename', () => openRenameModal(t)],
+    ['Export (.md)', () => exportThread(t.id, 'md')],
+    ['Export (.json)', () => exportThread(t.id, 'json')],
     [t.archived ? 'Unarchive' : 'Archive', () => api('/api/thread/archive', {id:t.id, archived:!t.archived})],
     ['Delete', () => openDeleteModal(t), true]
   ];
@@ -675,10 +697,10 @@ function showThreadMenu(t, btn){
 function threadRow(t){
   const d=document.createElement('div');
   d.className='thread'+(t.id===S.active?' active':'');
-  const isBusy = S.running && t.id===S.runningThread;
+  const isBusy = !!(S.runningThreads && S.runningThreads[t.id]);
   d.innerHTML='<div class="thread-main"><div class="tt">'+(isBusy?'<span class="act-dot" style="flex-shrink:0"></span>':'')+(t.pinned?'<span class="pin-ic">📌</span>':'')+'<span>'+esc(t.title)+'</span></div><div class="ts">'+ago(t.lastTime||t.created)+'</div></div>'+
     '<button class="thread-act" title="Thread actions" aria-label="Thread actions">⋯</button>';
-  d.onclick=()=>{ api('/api/active',{id:t.id}); if(isNarrow()) setSidebar(false); };
+  d.onclick=()=>{ switchThread(t.id); if(isNarrow()) setSidebar(false); };
   d.querySelector('.thread-act').onclick=(e)=>{ e.stopPropagation(); showThreadMenu(t, e.currentTarget); };
   return d;
 }
@@ -732,8 +754,18 @@ function renderMessages(list){
 
 /* state events */
 function applySnap(d){
+  const list = d.threads || [];
+  if(clientThread && d.active !== clientThread && list.some(t=>t.id===clientThread)){
+    fetch('/api/state?thread='+encodeURIComponent(clientThread)).then(r=>r.json()).then(applySnap).catch(()=>{});
+    return;
+  }
   const wasRunning=S.running;
-  S.threads=d.threads||[]; S.active=d.active;
+  S.threads=list; S.active=d.active;
+  if(S.active){ clientThread=S.active; localStorage.setItem('sentinel_thread', clientThread); }
+  const rt = {};
+  (d.runningThreads||[]).forEach(id=>{ rt[id]=true; });
+  if(d.running && d.runningThread) rt[d.runningThread]=true;
+  S.runningThreads = rt;
   S.running=!!d.running; S.runningThread=d.runningThread; S.runningMsgId=d.runningMsgId||0;
   S.activities=d.activities||[]; S.queued=d.queued||0;
   if(S.running && S.runningMsgId && S.runningThread){
@@ -775,13 +807,22 @@ function onActivity(d){
   if(d.thread===S.active){ S.activities = d.activities||[]; renderActivityPanel(); }
 }
 function onStatus(d){
-  const wasRunning=S.running;
-  S.running=!!d.running; S.runningThread=d.thread; S.runningMsgId=d.msgId||0; S.queued=d.queued||0;
-  if(!S.running) S.activities=[];
-  if(!wasRunning&&S.running) elapsedStart=Date.now();
+  if(d.thread){
+    if(d.running) S.runningThreads[d.thread] = true;
+    else delete S.runningThreads[d.thread];
+  }
+  if(!d.thread || d.thread === S.active){
+    const wasRunning = S.running;
+    S.running = !!d.running;
+    S.runningThread = d.running ? (d.thread || S.active) : '';
+    S.runningMsgId = d.msgId || 0;
+    S.queued = d.queued || 0;
+    if(!S.running) S.activities = [];
+    if(!wasRunning && S.running) elapsedStart = Date.now();
+    renderActivityPanel();
+    updateStatus();
+  }
   renderThreads();
-  renderActivityPanel();
-  updateStatus();
 }
 function updateStatus(){
   const st=$('#status'), stop=$('#stopbtn');
@@ -1024,7 +1065,7 @@ async function runSearch(q){
             setTimeout(()=>target.classList.remove('jump-hit'), 2200);
           }
         } else {
-          api('/api/active', {id: h.threadId});
+          switchThread(h.threadId);
         }
       };
       resEl.appendChild(el);
@@ -1082,7 +1123,8 @@ function execSlashCommand(cmd, arg){
       return true;
     case '/search': openSearchModal(arg); return true;
     case '/archive': api('/api/thread/archive', {id:S.active, archived:true}); return true;
-    case '/stop': api('/api/stop'); return true;
+    case '/stop': api('/api/stop', {thread:S.active}); return true;
+    case '/export': exportThread(S.active, arg||'md'); return true;
     case '/model':
       if(arg) setThreadModel(arg);
       else openModelModal();
@@ -1133,7 +1175,12 @@ function setSidebar(open){
   $('#sidebar').classList.toggle('open', !!open);
   $('#backdrop').classList.toggle('show', !!open);
 }
-function newChat(){ api('/api/new'); if(isNarrow()) setSidebar(false); }
+function newChat(){
+  clientThread = '';
+  localStorage.removeItem('sentinel_thread');
+  api('/api/new');
+  if(isNarrow()) setSidebar(false);
+}
 function send(){
   const el=$('#input'); const text=el.value.trim();
   if(text.startsWith('/')){
@@ -1148,7 +1195,7 @@ function send(){
   const files=pending.map(f=>({path:f.path,name:f.name}));
   pending.length=0; renderChips();
   el.value=''; autosize(); $('#cmd-popup').hidden=true;
-  api('/api/send',{text,files}).then(r=>{ if(!r.ok) r.text().then(t=>toast('send failed: '+t)); })
+  api('/api/send',{thread:S.active,text,files}).then(r=>{ if(!r.ok) r.text().then(t=>toast('send failed: '+t)); })
     .catch(e=>toast('send failed: '+e));
 }
 
@@ -1179,7 +1226,7 @@ $('#hdr-search').onclick=()=>openSearchModal('');
 $('#hdr-settings').onclick=()=>openSettingsModal('general');
 $('#settings-btn').onclick=()=>openSettingsModal('general');
 $('#ver-badge').onclick=()=>openSettingsModal('changelog');
-$('#stopbtn').onclick=()=>api('/api/stop');
+$('#stopbtn').onclick=()=>api('/api/stop',{thread:S.active});
 $('#attach').onclick=()=>$('#file').click();
 async function uploadFiles(fileList){
   if(!fileList || !fileList.length) return;
@@ -1245,7 +1292,7 @@ msgs.addEventListener('click', e => {
     }
     if(!prevUser){ toast('Nothing to retry'); return; }
     const files = (prevUser.files||[]).map(f=>({path:f.path,name:f.name}));
-    api('/api/send',{text:prevUser.text, files}).then(r=>{ if(!r.ok) r.text().then(t=>toast('retry failed: '+t)); })
+    api('/api/send',{thread:S.active, text:prevUser.text, files}).then(r=>{ if(!r.ok) r.text().then(t=>toast('retry failed: '+t)); })
       .catch(err=>toast('retry failed: '+err));
     return;
   }
@@ -1301,7 +1348,7 @@ fetch('/api/changelog').then(r=>r.json()).then(d=>{
   maybeShowWhatsNew();
 }).catch(()=>{});
 fetch('/api/commands').then(r=>r.json()).then(d=>{ commands=d.commands||[]; }).catch(()=>{});
-fetch('/api/state').then(r=>r.json()).then(applySnap).catch(()=>{});
+fetch('/api/state'+(clientThread?'?thread='+encodeURIComponent(clientThread):'')).then(r=>r.json()).then(applySnap).catch(()=>{});
 connect();
 if(new URLSearchParams(location.search).get('new')==='1'){
   history.replaceState(null,'','/');

@@ -5,7 +5,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestStoreThreadManagementAndSearch(t *testing.T) {
@@ -316,5 +319,66 @@ func TestModelSelection(t *testing.T) {
 	srv.handleThreadModel(rec, httptest.NewRequest(http.MethodPost, "/api/thread/model", bytes.NewReader(body)))
 	if rec.Code != http.StatusOK || st.Model(thr.ID) != "" {
 		t.Fatalf("expected reset to default, status=%d model=%q", rec.Code, st.Model(thr.ID))
+	}
+}
+
+func TestClientThreadFileScopeReaperAndExport(t *testing.T) {
+	dir := t.TempDir()
+	uploadDir := filepath.Join(dir, "uploads")
+	if err := os.MkdirAll(uploadDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	st := NewStore(dir)
+	t1 := st.NewThread()
+	t2 := st.NewThread() // t2 is now global active
+
+	refFile := filepath.Join(uploadDir, "kept.txt")
+	orphanFile := filepath.Join(uploadDir, "orphan.txt")
+	secretFile := filepath.Join(dir, "secret.txt")
+	for _, p := range []string{refFile, orphanFile, secretFile} {
+		if err := os.WriteFile(p, []byte("data"), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	oldTime := time.Now().Add(-48 * time.Hour)
+	_ = os.Chtimes(orphanFile, oldTime, oldTime)
+
+	st.AddUserTo(t1.ID, "message on t1", []Attachment{{Path: refFile, Name: "kept.txt", Size: 4, Kind: "file"}})
+
+	snap1 := st.SnapshotFor(t1.ID)
+	if snap1.Active != t1.ID || len(snap1.Messages) != 1 || snap1.Messages[0].Text != "message on t1" {
+		t.Fatalf("unexpected SnapshotFor(t1): %+v", snap1)
+	}
+	if st.Snapshot().Active != t2.ID {
+		t.Fatalf("SnapshotFor should not mutate global active %q", t2.ID)
+	}
+
+	srv := &Server{store: st, hub: NewHub(), dev: true, uploadDir: uploadDir, jobs: make(chan Job, 4)}
+
+	// File scope: unreferenced file outside uploadDir must be denied (404)
+	rec := httptest.NewRecorder()
+	srv.handleFile(rec, httptest.NewRequest(http.MethodGet, "/api/file?path="+secretFile, nil))
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for unattached file outside uploadDir, got %d", rec.Code)
+	}
+
+	// Upload reaper: removes old orphan, keeps referenced file
+	if removed := srv.reapUploadsOnce(24 * time.Hour); removed != 1 {
+		t.Fatalf("expected 1 reaped upload, got %d", removed)
+	}
+	if _, err := os.Stat(orphanFile); !os.IsNotExist(err) {
+		t.Fatalf("expected orphanFile to be removed")
+	}
+	if _, err := os.Stat(refFile); err != nil {
+		t.Fatalf("expected refFile to be kept: %v", err)
+	}
+
+	// Export: md and json
+	for _, fmtName := range []string{"md", "json", "txt"} {
+		rec = httptest.NewRecorder()
+		srv.handleExport(rec, httptest.NewRequest(http.MethodGet, "/api/export?thread="+t1.ID+"&format="+fmtName, nil))
+		if rec.Code != http.StatusOK || !bytes.Contains(rec.Body.Bytes(), []byte("message on t1")) {
+			t.Fatalf("export %s failed: code=%d body=%q", fmtName, rec.Code, rec.Body.String())
+		}
 	}
 }

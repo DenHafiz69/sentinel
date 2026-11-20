@@ -10,9 +10,11 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -47,6 +49,13 @@ type Job struct {
 	Query  string
 }
 
+type ThreadRun struct {
+	MsgID      int64
+	Text       strings.Builder
+	Activities []Activity
+	Cancel     context.CancelFunc
+}
+
 type Server struct {
 	store     *Store
 	hub       *Hub
@@ -56,7 +65,7 @@ type Server struct {
 
 	injectToken string // shared secret for POST /api/inject ("" disables it)
 
-	jobs chan Job
+	jobs chan Job // legacy fallback if initialized directly in tests
 
 	mu            sync.Mutex
 	running       bool
@@ -65,6 +74,9 @@ type Server struct {
 	runningText   strings.Builder
 	activities    []Activity
 	cancel        context.CancelFunc
+
+	threadQueues map[string]chan Job
+	activeRuns   map[string]*ThreadRun
 }
 
 type ctxKey int
@@ -141,24 +153,73 @@ func (s *Server) broadcast(kind string, data any) {
 
 func (s *Server) runningState() (bool, string, int64, string, []Activity, int) {
 	s.mu.Lock()
-	r, t, m, txt, act := s.running, s.runningThread, s.runningMsgID, s.runningText.String(), cloneActivities(s.activities)
-	s.mu.Unlock()
-	return r, t, m, txt, act, len(s.jobs)
+	defer s.mu.Unlock()
+	if len(s.activeRuns) > 0 {
+		for tid, ar := range s.activeRuns {
+			qLen := 0
+			if ch, ok := s.threadQueues[tid]; ok {
+				qLen = len(ch)
+			}
+			return true, tid, ar.MsgID, ar.Text.String(), cloneActivities(ar.Activities), qLen
+		}
+	}
+	return s.running, s.runningThread, s.runningMsgID, s.runningText.String(), cloneActivities(s.activities), len(s.jobs)
 }
 
 func (s *Server) snapshotPayload() map[string]any {
-	snap := s.store.Snapshot()
-	r, t, m, txt, act, q := s.runningState()
+	return s.snapshotPayloadFor("")
+}
+
+func (s *Server) snapshotPayloadFor(threadID string) map[string]any {
+	snap := s.store.SnapshotFor(threadID)
+	s.mu.Lock()
+	var runningThreads []string
+	for tid := range s.activeRuns {
+		runningThreads = append(runningThreads, tid)
+	}
+	if s.running && s.runningThread != "" {
+		found := false
+		for _, tid := range runningThreads {
+			if tid == s.runningThread {
+				found = true
+				break
+			}
+		}
+		if !found {
+			runningThreads = append(runningThreads, s.runningThread)
+		}
+	}
+	var (
+		r   bool
+		t   string
+		m   int64
+		txt string
+		act []Activity
+		q   int
+	)
+	if ar, ok := s.activeRuns[snap.Active]; ok {
+		r, t, m, txt, act = true, snap.Active, ar.MsgID, ar.Text.String(), cloneActivities(ar.Activities)
+		if ch, ok := s.threadQueues[snap.Active]; ok {
+			q = len(ch)
+		}
+	} else if s.running && s.runningThread == snap.Active {
+		r, t, m, txt, act, q = true, s.runningThread, s.runningMsgID, s.runningText.String(), cloneActivities(s.activities), len(s.jobs)
+	}
+	s.mu.Unlock()
+	if runningThreads == nil {
+		runningThreads = []string{}
+	}
 	return map[string]any{
-		"threads":       snap.Threads,
-		"active":        snap.Active,
-		"messages":      snap.Messages,
-		"running":       r,
-		"runningThread": t,
-		"runningMsgId":  m,
-		"runningText":   txt,
-		"activities":    act,
-		"queued":        q,
+		"threads":        snap.Threads,
+		"active":         snap.Active,
+		"messages":       snap.Messages,
+		"running":        r,
+		"runningThread":  t,
+		"runningThreads": runningThreads,
+		"runningMsgId":   m,
+		"runningText":    txt,
+		"activities":     act,
+		"queued":         q,
 	}
 }
 
@@ -209,46 +270,76 @@ func (s *Server) deny(w http.ResponseWriter, r *http.Request) {
 
 // ---------- agent worker ----------
 
-func (s *Server) worker() {
-	for job := range s.jobs {
+func (s *Server) threadQueue(threadID string) chan Job {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.threadQueues == nil {
+		s.threadQueues = map[string]chan Job{}
+	}
+	ch, ok := s.threadQueues[threadID]
+	if !ok {
+		ch = make(chan Job, 16)
+		s.threadQueues[threadID] = ch
+		go s.threadWorker(ch)
+	}
+	return ch
+}
+
+func (s *Server) threadWorker(ch <-chan Job) {
+	for job := range ch {
 		s.runJob(job)
 	}
 }
 
+func (s *Server) cancelAllRuns() {
+	s.mu.Lock()
+	if s.cancel != nil {
+		s.cancel()
+	}
+	for _, ar := range s.activeRuns {
+		if ar.Cancel != nil {
+			ar.Cancel()
+		}
+	}
+	s.mu.Unlock()
+}
+
 func (s *Server) runJob(job Job) {
 	ctx, cancel := context.WithCancel(context.Background())
+	ar := &ThreadRun{MsgID: job.MsgID, Cancel: cancel}
 	s.mu.Lock()
-	s.running = true
-	s.runningThread = job.Thread
-	s.runningMsgID = job.MsgID
-	s.runningText.Reset()
-	s.activities = nil
-	s.cancel = cancel
+	if s.activeRuns == nil {
+		s.activeRuns = map[string]*ThreadRun{}
+	}
+	s.activeRuns[job.Thread] = ar
+	qLen := 0
+	if ch, ok := s.threadQueues[job.Thread]; ok {
+		qLen = len(ch)
+	}
 	s.mu.Unlock()
-	s.broadcast("status", map[string]any{"running": true, "thread": job.Thread, "msgId": job.MsgID, "queued": len(s.jobs)})
+	s.broadcast("status", map[string]any{"running": true, "thread": job.Thread, "msgId": job.MsgID, "queued": qLen})
 
 	session := s.store.SessionName(job.Thread)
 	model := s.store.Model(job.Thread)
 	res := runHermes(ctx, session, model, job.Query, func(delta string) {
 		s.mu.Lock()
-		s.runningText.WriteString(delta)
+		ar.Text.WriteString(delta)
 		s.mu.Unlock()
 		s.broadcast("delta", map[string]any{"thread": job.Thread, "id": job.MsgID, "text": delta})
 	}, func(acts []Activity) {
 		s.mu.Lock()
-		s.activities = acts
+		ar.Activities = acts
 		s.mu.Unlock()
 		s.broadcast("activity", map[string]any{"thread": job.Thread, "msgId": job.MsgID, "activities": acts})
 	})
 
 	cancel()
 	s.mu.Lock()
-	s.running = false
-	s.runningThread = ""
-	s.runningMsgID = 0
-	s.runningText.Reset()
-	s.activities = nil
-	s.cancel = nil
+	delete(s.activeRuns, job.Thread)
+	qLen = 0
+	if ch, ok := s.threadQueues[job.Thread]; ok {
+		qLen = len(ch)
+	}
 	s.mu.Unlock()
 
 	switch {
@@ -268,7 +359,7 @@ func (s *Server) runJob(job Job) {
 		m := s.store.FinalizeAssistant(job.Thread, job.MsgID, res.Text, extractAttachments(res.Text), res.Activities, res.SessionID)
 		s.broadcast("msg", map[string]any{"thread": job.Thread, "message": m})
 	}
-	s.broadcast("status", map[string]any{"running": false, "thread": "", "msgId": 0, "queued": len(s.jobs)})
+	s.broadcast("status", map[string]any{"running": false, "thread": job.Thread, "msgId": 0, "queued": qLen})
 }
 
 // ---------- handlers ----------
@@ -329,7 +420,7 @@ func (s *Server) serveWebAsset(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, s.snapshotPayload())
+	writeJSON(w, s.snapshotPayloadFor(r.URL.Query().Get("thread")))
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
@@ -577,8 +668,9 @@ func (s *Server) composeQuery(text string, files []Attachment) string {
 
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Text  string `json:"text"`
-		Files []struct {
+		Thread string `json:"thread"`
+		Text   string `json:"text"`
+		Files  []struct {
 			Path string `json:"path"`
 			Name string `json:"name"`
 		} `json:"files"`
@@ -610,11 +702,21 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "empty message", http.StatusBadRequest)
 		return
 	}
-	tl, _ := s.store.AddUser(text, files)
+
+	targetThread := strings.TrimSpace(req.Thread)
+	if targetThread == "" {
+		targetThread = s.store.Snapshot().Active
+	}
+	q := s.threadQueue(targetThread)
+	if len(q) >= cap(q) {
+		http.Error(w, "queue full, try again shortly", http.StatusServiceUnavailable)
+		return
+	}
+	tl, msg := s.store.AddUserTo(targetThread, text, files)
 	msgID := s.store.ReserveMsgID()
-	s.broadcast("snapshot", s.snapshotPayload())
+	s.broadcast("msg", map[string]any{"thread": tl.ID, "message": msg})
 	select {
-	case s.jobs <- Job{Thread: tl.ID, MsgID: msgID, Query: s.composeQuery(text, files)}:
+	case q <- Job{Thread: tl.ID, MsgID: msgID, Query: s.composeQuery(text, files)}:
 	default:
 		http.Error(w, "queue full, try again shortly", http.StatusServiceUnavailable)
 		return
@@ -623,8 +725,26 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Thread string `json:"thread"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req)
+
 	s.mu.Lock()
-	c := s.cancel
+	var c context.CancelFunc
+	if req.Thread != "" {
+		if ar, ok := s.activeRuns[req.Thread]; ok {
+			c = ar.Cancel
+		}
+	} else {
+		for _, ar := range s.activeRuns {
+			c = ar.Cancel
+			break
+		}
+		if c == nil {
+			c = s.cancel
+		}
+	}
 	s.mu.Unlock()
 	if c != nil {
 		c()
@@ -706,6 +826,111 @@ func serveRootDirs() []string {
 	return []string{homeDir, "/mnt/data", "/tmp"}
 }
 
+func (s *Server) isAllowedFile(cleanPath string) bool {
+	if s.uploadDir != "" && strings.HasPrefix(cleanPath, filepath.Clean(s.uploadDir)+string(os.PathSeparator)) {
+		return true
+	}
+	return s.store.HasAttachment(cleanPath)
+}
+
+func (s *Server) reapUploadsOnce(maxAge time.Duration) int {
+	if s.uploadDir == "" {
+		return 0
+	}
+	entries, err := os.ReadDir(s.uploadDir)
+	if err != nil {
+		return 0
+	}
+	refs := s.store.ReferencedPaths()
+	cutoff := time.Now().Add(-maxAge)
+	removed := 0
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		p := filepath.Join(s.uploadDir, e.Name())
+		if refs[filepath.Clean(p)] {
+			continue
+		}
+		fi, err := e.Info()
+		if err != nil || !fi.ModTime().Before(cutoff) {
+			continue
+		}
+		if os.Remove(p) == nil {
+			removed++
+		}
+	}
+	return removed
+}
+
+func (s *Server) reapUploads(ctx context.Context) {
+	t := time.NewTicker(1 * time.Hour)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			if n := s.reapUploadsOnce(24 * time.Hour); n > 0 {
+				log.Printf("sentinel: reaped %d orphaned upload(s)", n)
+			}
+		}
+	}
+}
+
+func (s *Server) handleExport(w http.ResponseWriter, r *http.Request) {
+	tid := r.URL.Query().Get("thread")
+	format := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("format")))
+	if format == "" {
+		format = "md"
+	}
+	thr, ok := s.store.ThreadByID(tid)
+	if !ok {
+		http.Error(w, "no such thread", http.StatusNotFound)
+		return
+	}
+	base := sanitizeName(thr.Title)
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	switch format {
+	case "json":
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": base + ".json"}))
+		_ = json.NewEncoder(w).Encode(thr)
+	case "txt":
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": base + ".txt"}))
+		var b strings.Builder
+		fmt.Fprintf(&b, "%s\n%s\n\n", thr.Title, strings.Repeat("=", len(thr.Title)))
+		for _, m := range thr.Messages {
+			ts := time.Unix(m.Time, 0).Format("2006-01-02 15:04")
+			fmt.Fprintf(&b, "[%s] %s:\n%s\n", ts, strings.ToUpper(m.Role), m.Text)
+			for _, f := range m.Files {
+				fmt.Fprintf(&b, "  [attachment: %s]\n", f.Name)
+			}
+			b.WriteByte('\n')
+		}
+		_, _ = io.WriteString(w, b.String())
+	case "md":
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": base + ".md"}))
+		var b strings.Builder
+		fmt.Fprintf(&b, "# %s\n\n", thr.Title)
+		for _, m := range thr.Messages {
+			ts := time.Unix(m.Time, 0).Format("2006-01-02 15:04")
+			fmt.Fprintf(&b, "### %s (%s)\n\n%s\n\n", strings.ToUpper(m.Role), ts, m.Text)
+			for _, f := range m.Files {
+				fmt.Fprintf(&b, "- Attachment: `%s`\n", f.Name)
+			}
+			if len(m.Files) > 0 {
+				b.WriteByte('\n')
+			}
+		}
+		_, _ = io.WriteString(w, b.String())
+	default:
+		http.Error(w, "unsupported format (use md, json, or txt)", http.StatusBadRequest)
+	}
+}
+
 func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 	p := r.URL.Query().Get("path")
 	if p == "" {
@@ -716,6 +941,10 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 		p = filepath.Join(homeDir, p[2:])
 	}
 	p = filepath.Clean(p)
+	if !s.isAllowedFile(p) {
+		http.Error(w, "not found", http.StatusNotFound)
+		return
+	}
 
 	// Serve only from fixed roots. os.Root enforces containment at the
 	// kernel level: neither ".." nor symlinks inside the root can escape it.
@@ -794,15 +1023,19 @@ func main() {
 	}
 
 	srv := &Server{
-		store:       store,
-		hub:         NewHub(),
-		auth:        NewAccessAuth(team, aud),
-		dev:         dev,
-		uploadDir:   uploadDir,
-		injectToken: injectToken,
-		jobs:        make(chan Job, 16),
+		store:        store,
+		hub:          NewHub(),
+		auth:         NewAccessAuth(team, aud),
+		dev:          dev,
+		uploadDir:    uploadDir,
+		injectToken:  injectToken,
+		jobs:         make(chan Job, 16),
+		threadQueues: map[string]chan Job{},
+		activeRuns:   map[string]*ThreadRun{},
 	}
-	go srv.worker()
+	sigCtx, stopSig := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopSig()
+	go srv.reapUploads(sigCtx)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
@@ -819,6 +1052,7 @@ func main() {
 	mux.HandleFunc("GET /api/commands", srv.authed(srv.handleCommands))
 	mux.HandleFunc("GET /api/models", srv.authed(srv.handleModels))
 	mux.HandleFunc("GET /api/search", srv.authed(srv.handleSearch))
+	mux.HandleFunc("GET /api/export", srv.authed(srv.handleExport))
 	mux.HandleFunc("GET /api/events", srv.authed(srv.handleEvents))
 	mux.HandleFunc("POST /api/new", srv.authed(srv.handleNew))
 	mux.HandleFunc("POST /api/active", srv.authed(srv.handleActive))
@@ -842,5 +1076,25 @@ func main() {
 	// Environment= lines, not from requests; they are control-stripped anyway.
 	log.Printf("sentinel listening on http://%s (dev=%v, access team=%s, aud=%s)",
 		sanitizeLog(addr), dev, sanitizeLog(team), sanitizeLog(aud))
-	log.Fatal(hs.ListenAndServe())
+	errCh := make(chan error, 1)
+	go func() {
+		if err := hs.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- err
+		}
+		close(errCh)
+	}()
+	select {
+	case err := <-errCh:
+		if err != nil {
+			log.Fatal(err)
+		}
+	case <-sigCtx.Done():
+		log.Printf("sentinel shutting down...")
+		srv.cancelAllRuns()
+		shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer shutCancel()
+		if err := hs.Shutdown(shutCtx); err != nil {
+			log.Printf("sentinel shutdown error: %v", err)
+		}
+	}
 }
