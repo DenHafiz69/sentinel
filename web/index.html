@@ -735,7 +735,6 @@ function applySnap(d){
   const wasRunning=S.running;
   S.threads=d.threads||[]; S.active=d.active;
   S.running=!!d.running; S.runningThread=d.runningThread; S.runningMsgId=d.runningMsgId||0;
-  document.body.classList.toggle('is-running', S.running);
   S.activities=d.activities||[]; S.queued=d.queued||0;
   if(S.running && S.runningMsgId && S.runningThread){
     streamThread[S.runningMsgId] = S.runningThread;
@@ -778,7 +777,6 @@ function onActivity(d){
 function onStatus(d){
   const wasRunning=S.running;
   S.running=!!d.running; S.runningThread=d.thread; S.runningMsgId=d.msgId||0; S.queued=d.queued||0;
-  document.body.classList.toggle('is-running', S.running);
   if(!S.running) S.activities=[];
   if(!wasRunning&&S.running) elapsedStart=Date.now();
   renderThreads();
@@ -788,6 +786,9 @@ function onStatus(d){
 function updateStatus(){
   const st=$('#status'), stop=$('#stopbtn');
   const activeRunning = S.running && S.runningThread === S.active;
+  // Header space is only tight while THIS thread is running; a run in another
+  // thread must not hide the search/settings buttons.
+  document.body.classList.toggle('is-running', activeRunning);
   if(sseState==='expired'){
     st.textContent='session expired — reload to sign in';
     st.classList.remove('busy');
