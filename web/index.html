@@ -85,6 +85,11 @@ header h1{font-size:16px;font-weight:600}
 #elapsed{font-size:12px;color:var(--dim);margin-left:6px}
 .hdr-right{margin-left:auto;display:flex;align-items:center;gap:8px}
 #hdr-search,#hdr-settings{display:none;background:var(--side2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:14px;cursor:pointer;min-height:36px}
+#model-pill{background:var(--side2);color:var(--dim);border:1px solid var(--line);border-radius:8px;padding:5px 10px;font-size:12px;cursor:pointer;max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#model-pill:hover{border-color:var(--accent);color:var(--txt)}
+.model-opt{display:flex;align-items:center;justify-content:space-between;width:100%;text-align:left;background:var(--side2);border:1px solid var(--line);color:var(--txt);padding:9px 12px;border-radius:9px;font-size:13px;cursor:pointer;margin-bottom:6px}
+.model-opt:hover,.model-opt.active{border-color:var(--accent)}
+.model-opt.active{background:rgba(106,179,243,.12)}
 #stopbtn{background:var(--side2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;min-height:34px}
 #stopbtn:hover{border-color:var(--err);color:#ff8f7a}
 /* messages */
@@ -248,6 +253,7 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
         <div><span id="status">connecting…</span><span id="elapsed"></span></div>
       </div>
       <div class="hdr-right">
+        <button id="model-pill" title="Select model (/model)">default</button>
         <button id="hdr-search" title="Search conversations">🔍</button>
         <button id="hdr-settings" title="Settings">⚙️</button>
         <button id="stopbtn" hidden>Stop</button>
@@ -349,6 +355,22 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
       <div class="confirm-btns">
         <button class="btn" id="wn-full">Full changelog</button>
         <button class="btn primary" id="wn-ok">Got it</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="model-modal" class="modal-bg" hidden>
+  <div class="modal">
+    <div class="modal-hdr">
+      <h2>Select Model</h2>
+      <button class="modal-close" data-close="model-modal">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="model-list"></div>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <input id="model-custom" type="text" placeholder="Custom model ID (e.g. claude-sonnet-4-5)" style="flex:1;background:var(--side2);border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:8px 10px;font:inherit;outline:none">
+        <button class="btn primary" id="model-apply">Apply</button>
       </div>
     </div>
   </div>
@@ -639,6 +661,8 @@ function applySnap(d){
   renderMessages(d.messages||[]);
   renderActivityPanel();
   updateStatus();
+  const actThr = S.threads.find(t=>t.id===S.active);
+  $('#model-pill').textContent = (actThr && actThr.model) ? actThr.model : 'default';
 }
 function onMsg(d){
   delete streamBuf[d.message.id]; delete streamThread[d.message.id];
@@ -828,6 +852,40 @@ function maybeShowWhatsNew(){
   openModal('whatsnew-modal');
 }
 $('#wn-ok').onclick = () => { markChangelogSeen(); closeModal('whatsnew-modal'); };
+async function setThreadModel(model){
+  try{
+    const r = await api('/api/thread/model', {id:S.active, model:model||''});
+    if(!r.ok) throw new Error(await r.text());
+    const d = await r.json();
+    toast('Model: ' + (d.model || 'default'));
+  }catch(err){ toast('model update failed: '+err); }
+}
+async function openModelModal(){
+  let data = {current:'', models:[]};
+  try{
+    const r = await fetch('/api/models');
+    if(r.ok) data = await r.json();
+  }catch(_){}
+  const cur = data.current || '';
+  const listEl = $('#model-list');
+  const opts = [{val:'', label:'Default (Hermes config)'}, ...(data.models||[]).map(m=>({val:m, label:m}))];
+  listEl.innerHTML = '';
+  for(const o of opts){
+    const b = document.createElement('button');
+    b.className = 'model-opt' + (cur===o.val?' active':'');
+    b.innerHTML = '<span>'+esc(o.label)+'</span>' + (cur===o.val?'<span>✓</span>':'');
+    b.onclick = () => { closeModal('model-modal'); setThreadModel(o.val); };
+    listEl.appendChild(b);
+  }
+  const inp = $('#model-custom');
+  inp.value = cur;
+  openModal('model-modal');
+  inp.focus();
+  const commit = () => { closeModal('model-modal'); setThreadModel(inp.value.trim()); };
+  $('#model-apply').onclick = commit;
+  inp.onkeydown = e => { if(e.key==='Enter'){ e.preventDefault(); commit(); } };
+}
+$('#model-pill').onclick = openModelModal;
 $('#wn-full').onclick = () => { markChangelogSeen(); closeModal('whatsnew-modal'); openSettingsModal('changelog'); };
 $('#whatsnew-modal .modal-close').onclick = () => { markChangelogSeen(); closeModal('whatsnew-modal'); };
 
@@ -931,6 +989,10 @@ function execSlashCommand(cmd, arg){
     case '/search': openSearchModal(arg); return true;
     case '/archive': api('/api/thread/archive', {id:S.active, archived:true}); return true;
     case '/stop': api('/api/stop'); return true;
+    case '/model':
+      if(arg) setThreadModel(arg);
+      else openModelModal();
+      return true;
     case '/update': runUpdate(); return true;
     case '/settings': openSettingsModal('general'); return true;
   }
@@ -1125,7 +1187,7 @@ window.addEventListener('keydown', e => {
     closeThreadMenu();
     setSidebar(false);
     if(!$('#whatsnew-modal').hidden) markChangelogSeen();
-    ['search-modal','help-modal','prompt-modal','confirm-modal','settings-modal','whatsnew-modal'].forEach(closeModal);
+    ['search-modal','help-modal','prompt-modal','confirm-modal','settings-modal','whatsnew-modal','model-modal'].forEach(closeModal);
     $('#cmd-popup').hidden = true;
   }
 });

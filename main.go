@@ -226,7 +226,8 @@ func (s *Server) runJob(job Job) {
 	s.broadcast("status", map[string]any{"running": true, "thread": job.Thread, "msgId": job.MsgID, "queued": len(s.jobs)})
 
 	session := s.store.SessionName(job.Thread)
-	res := runHermes(ctx, session, job.Query, func(delta string) {
+	model := s.store.Model(job.Thread)
+	res := runHermes(ctx, session, model, job.Query, func(delta string) {
 		s.mu.Lock()
 		s.runningText.WriteString(delta)
 		s.mu.Unlock()
@@ -452,6 +453,92 @@ func (s *Server) handleThreadClear(w http.ResponseWriter, r *http.Request) {
 	}
 	s.broadcast("snapshot", s.snapshotPayload())
 	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (s *Server) handleThreadModel(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID    string `json:"id"`
+		Model string `json:"model"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil || !s.store.SetModel(req.ID, req.Model) {
+		http.Error(w, "invalid thread or model", http.StatusBadRequest)
+		return
+	}
+	s.broadcast("snapshot", s.snapshotPayload())
+	writeJSON(w, map[string]any{"ok": true, "model": s.store.Model(req.ID)})
+}
+
+func discoverHermesModels() []string {
+	var out []string
+	if raw := os.Getenv("SENTINEL_MODELS"); raw != "" {
+		for _, part := range strings.Split(raw, ",") {
+			if m := strings.TrimSpace(part); m != "" && validModelName(m) {
+				out = append(out, m)
+			}
+		}
+	}
+	cfgPath := filepath.Join(homeDir, ".hermes", "config.yaml")
+	// #nosec G304 — cfgPath is fixed to ~/.hermes/config.yaml under homeDir.
+	if b, err := os.ReadFile(cfgPath); err == nil {
+		inModels := false
+		for _, line := range strings.Split(string(b), "\n") {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+				continue
+			}
+			if strings.HasPrefix(trimmed, "model:") {
+				v := strings.TrimSpace(strings.TrimPrefix(trimmed, "model:"))
+				v = strings.Trim(v, `"'`)
+				if v != "" && validModelName(v) {
+					out = append(out, v)
+				}
+				inModels = false
+				continue
+			}
+			if trimmed == "models:" {
+				inModels = true
+				continue
+			}
+			if inModels {
+				if strings.HasPrefix(trimmed, "- ") {
+					v := strings.TrimSpace(strings.TrimPrefix(trimmed, "- "))
+					v = strings.Trim(v, `"'`)
+					if v != "" && validModelName(v) {
+						out = append(out, v)
+					}
+				} else if !strings.HasPrefix(line, " ") && !strings.HasPrefix(line, "\t") {
+					inModels = false
+				}
+			}
+		}
+	}
+	return out
+}
+
+func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
+	seen := map[string]bool{}
+	var models []string
+	add := func(m string) {
+		m = strings.TrimSpace(m)
+		if m != "" && !seen[m] {
+			seen[m] = true
+			models = append(models, m)
+		}
+	}
+	for _, m := range discoverHermesModels() {
+		add(m)
+	}
+	for _, m := range s.store.UsedModels() {
+		add(m)
+	}
+	if models == nil {
+		models = []string{}
+	}
+	snap := s.store.Snapshot()
+	writeJSON(w, map[string]any{
+		"current": s.store.Model(snap.Active),
+		"models":  models,
+	})
 }
 
 // composeQuery shapes the message Hermes receives. Images follow the upstream
@@ -720,6 +807,7 @@ func main() {
 	mux.HandleFunc("GET /api/me", srv.authed(srv.handleMe))
 	mux.HandleFunc("GET /api/changelog", srv.authed(srv.handleChangelog))
 	mux.HandleFunc("GET /api/commands", srv.authed(srv.handleCommands))
+	mux.HandleFunc("GET /api/models", srv.authed(srv.handleModels))
 	mux.HandleFunc("GET /api/search", srv.authed(srv.handleSearch))
 	mux.HandleFunc("GET /api/events", srv.authed(srv.handleEvents))
 	mux.HandleFunc("POST /api/new", srv.authed(srv.handleNew))
@@ -729,6 +817,7 @@ func main() {
 	mux.HandleFunc("POST /api/thread/archive", srv.authed(srv.handleThreadArchive))
 	mux.HandleFunc("POST /api/thread/delete", srv.authed(srv.handleThreadDelete))
 	mux.HandleFunc("POST /api/thread/clear", srv.authed(srv.handleThreadClear))
+	mux.HandleFunc("POST /api/thread/model", srv.authed(srv.handleThreadModel))
 	mux.HandleFunc("POST /api/send", srv.authed(srv.handleSend))
 	mux.HandleFunc("POST /api/stop", srv.authed(srv.handleStop))
 	mux.HandleFunc("POST /api/update", srv.authed(srv.handleUpdate))

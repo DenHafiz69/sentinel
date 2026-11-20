@@ -273,3 +273,48 @@ func TestHandlerChangelog(t *testing.T) {
 		t.Fatalf("unexpected changelog payload: %+v", resp)
 	}
 }
+
+func TestModelSelection(t *testing.T) {
+	dir := t.TempDir()
+	st := NewStore(dir)
+	thr := st.NewThread()
+
+	if st.SetModel(thr.ID, "--bad-flag") || st.SetModel(thr.ID, "has space") {
+		t.Fatal("expected invalid model names to be rejected")
+	}
+	if !st.SetModel(thr.ID, "anthropic/claude-sonnet-4") {
+		t.Fatal("expected valid model name to succeed")
+	}
+	if got := st.Model(thr.ID); got != "anthropic/claude-sonnet-4" {
+		t.Fatalf("Model = %q, want anthropic/claude-sonnet-4", got)
+	}
+	if used := st.UsedModels(); len(used) != 1 || used[0] != "anthropic/claude-sonnet-4" {
+		t.Fatalf("unexpected UsedModels: %+v", used)
+	}
+
+	srv := &Server{store: st, hub: NewHub(), dev: true, uploadDir: dir, jobs: make(chan Job, 4)}
+	t.Setenv("SENTINEL_MODELS", "openai/gpt-5,google/gemini-2.5-pro")
+
+	rec := httptest.NewRecorder()
+	srv.handleModels(rec, httptest.NewRequest(http.MethodGet, "/api/models", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("models status = %d", rec.Code)
+	}
+	var mresp struct {
+		Current string   `json:"current"`
+		Models  []string `json:"models"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &mresp); err != nil {
+		t.Fatalf("unmarshal models: %v", err)
+	}
+	if mresp.Current != "anthropic/claude-sonnet-4" || len(mresp.Models) < 3 {
+		t.Fatalf("unexpected models response: %+v", mresp)
+	}
+
+	body, _ := json.Marshal(map[string]any{"id": thr.ID, "model": "default"})
+	rec = httptest.NewRecorder()
+	srv.handleThreadModel(rec, httptest.NewRequest(http.MethodPost, "/api/thread/model", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK || st.Model(thr.ID) != "" {
+		t.Fatalf("expected reset to default, status=%d model=%q", rec.Code, st.Model(thr.ID))
+	}
+}

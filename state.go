@@ -43,6 +43,7 @@ type Thread struct {
 	Title       string    `json:"title"`
 	SessionName string    `json:"sessionName"` // passed to hermes --continue
 	SessionID   string    `json:"sessionId,omitempty"`
+	Model       string    `json:"model,omitempty"`
 	Pinned      bool      `json:"pinned,omitempty"`
 	Archived    bool      `json:"archived,omitempty"`
 	Created     int64     `json:"created"`
@@ -52,6 +53,7 @@ type Thread struct {
 type ThreadLite struct {
 	ID       string `json:"id"`
 	Title    string `json:"title"`
+	Model    string `json:"model,omitempty"`
 	Pinned   bool   `json:"pinned,omitempty"`
 	Archived bool   `json:"archived,omitempty"`
 	Created  int64  `json:"created"`
@@ -140,6 +142,7 @@ func lite(t *Thread) ThreadLite {
 	return ThreadLite{
 		ID:       t.ID,
 		Title:    t.Title,
+		Model:    t.Model,
 		Pinned:   t.Pinned,
 		Archived: t.Archived,
 		Created:  t.Created,
@@ -212,6 +215,69 @@ func (s *Store) SessionName(threadID string) string {
 		return t.SessionName
 	}
 	return ""
+}
+
+func validModelName(m string) bool {
+	if m == "" {
+		return true
+	}
+	if len(m) > 120 || strings.HasPrefix(m, "-") {
+		return false
+	}
+	for _, r := range m {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.', r == '_', r == '-', r == '/', r == ':', r == '@':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func (s *Store) Model(threadID string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if t := s.find(threadID); t != nil {
+		return t.Model
+	}
+	return ""
+}
+
+func (s *Store) SetModel(id, model string) bool {
+	model = strings.TrimSpace(model)
+	if strings.EqualFold(model, "default") || strings.EqualFold(model, "reset") {
+		model = ""
+	}
+	if !validModelName(model) {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == "" {
+		id = s.active
+	}
+	t := s.find(id)
+	if t == nil {
+		return false
+	}
+	t.Model = model
+	s.saveLocked()
+	return true
+}
+
+func (s *Store) UsedModels() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	seen := map[string]bool{}
+	var out []string
+	for _, t := range s.threads {
+		if t.Model != "" && !seen[t.Model] {
+			seen[t.Model] = true
+			out = append(out, t.Model)
+		}
+	}
+	return out
 }
 
 func shortTitle(text string, files []Attachment) string {

@@ -132,7 +132,7 @@ func cloneActivities(src []Activity) []Activity {
 	return out
 }
 
-func runHermes(ctx context.Context, sessionName, query string, onDelta func(string), onActivity func([]Activity)) AgentResult {
+func runHermes(ctx context.Context, sessionName, model, query string, onDelta func(string), onActivity func([]Activity)) AgentResult {
 	var res AgentResult
 	qf, err := os.CreateTemp(dataDir, "q-*.txt")
 	if err != nil {
@@ -150,6 +150,9 @@ func runHermes(ctx context.Context, sessionName, query string, onDelta func(stri
 		"--query-file", qf.Name(),
 		"-Q", "--format", "stream-json",
 		"--continue", sessionName, "--create-if-missing",
+	}
+	if model != "" && validModelName(model) {
+		args = append(args, "--model", model)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
