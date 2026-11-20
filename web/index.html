@@ -145,7 +145,7 @@ header h1{font-size:16px;font-weight:600}
 .row{display:flex;align-items:flex-end;gap:8px}
 #attach{background:var(--side2);border:1px solid var(--line);border-radius:12px;color:var(--txt);width:42px;height:42px;font-size:17px;cursor:pointer;flex-shrink:0}
 #attach:hover{border-color:var(--accent)}
-#input{flex:1;resize:none;border:1px solid var(--line);background:var(--side2);color:var(--txt);border-radius:12px;padding:11px 14px;font:inherit;max-height:160px;outline:none}
+#input{flex:1;resize:none;border:1px solid var(--line);background:var(--side2);color:var(--txt);border-radius:12px;padding:10px 14px;font:inherit;line-height:1.35;min-height:44px;max-height:160px;overflow-y:auto;outline:none}
 #input:focus{border-color:#3a3f47}
 #send{background:var(--accent);border:none;border-radius:12px;color:#08141f;width:42px;height:42px;font-size:17px;cursor:pointer;flex-shrink:0}
 #send:hover{filter:brightness(1.1)}
@@ -225,7 +225,7 @@ header h1{font-size:16px;font-weight:600}
       <div id="chips"></div>
       <div class="row">
         <button id="attach" title="attach files">📎<input type="file" id="file" multiple hidden></button>
-        <textarea id="input" rows="1" placeholder="Message Sentinel…  type / for commands (Shift+Enter for newline)" autocomplete="off"></textarea>
+        <textarea id="input" rows="1" placeholder="Message Sentinel… (/ for commands)" autocomplete="off"></textarea>
         <button id="send">➤</button>
       </div>
     </div>
