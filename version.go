@@ -3,7 +3,7 @@ package main
 import "net/http"
 
 // Version can be overridden at build time via -ldflags "-X main.Version=x.y.z".
-var Version = "0.2.3"
+var Version = "0.2.4"
 
 type ChangelogEntry struct {
 	Version string   `json:"version"`
@@ -13,6 +13,16 @@ type ChangelogEntry struct {
 }
 
 var changelog = []ChangelogEntry{
+	{
+		Version: "0.2.4",
+		Date:    "2026-11-21",
+		Title:   "Mobile Polish & Per-Thread Thinking Status",
+		Items: []string{
+			"Hid desktop-only Ctrl+K hints on mobile/touch devices while keeping them on desktop",
+			"Shortened composer placeholder and prevented wrapping/clipping on narrow screens",
+			"Scoped header thinking status, elapsed timer, and Stop button to the active thread",
+		},
+	},
 	{
 		Version: "0.2.3",
 		Date:    "2026-11-21",
