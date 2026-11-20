@@ -119,3 +119,26 @@ func TestHandlersCommandsSearchAndThreads(t *testing.T) {
 		t.Fatalf("expected Renamed title, got %q", st.Snapshot().Threads[0].Title)
 	}
 }
+
+func TestPWAInstallAssets(t *testing.T) {
+	srv := &Server{dev: false}
+	for _, tc := range []struct {
+		path string
+		want string
+	}{
+		{"/manifest.webmanifest", "application/manifest+json"},
+		{"/sw.js", "text/javascript"},
+		{"/icon-192.png", "image/png"},
+		{"/icon-512.png", "image/png"},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		rec := httptest.NewRecorder()
+		srv.serveWebAsset(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s returned %d", tc.path, rec.Code)
+		}
+		if ct := rec.Header().Get("Content-Type"); !bytes.Contains([]byte(ct), []byte(tc.want)) {
+			t.Fatalf("%s Content-Type = %q, want %q", tc.path, ct, tc.want)
+		}
+	}
+}
