@@ -1,8 +1,8 @@
 // Sentinel service worker: caches the app shell for offline launch.
 // Never intercepts /api/* — chat traffic always goes straight to the network.
 
-const CACHE = 'sentinel-v1';
-const SHELL = ['/', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png'];
+const CACHE = 'sentinel-v2';
+const SHELL = ['/', '/manifest.webmanifest', '/icon-192.png', '/icon-512.png', '/icon-512-maskable.png', '/apple-touch-icon.png'];
 
 self.addEventListener('install', (e) => {
   e.waitUntil(

@@ -18,12 +18,24 @@ type Attachment struct {
 	Kind string `json:"kind"` // image | video | audio | file
 }
 
+type Activity struct {
+	ID         string `json:"id"`
+	Kind       string `json:"kind"` // tool | thinking | status
+	Name       string `json:"name"`
+	Detail     string `json:"detail,omitempty"`
+	Status     string `json:"status"` // running | done | error
+	Error      string `json:"error,omitempty"`
+	StartedAt  int64  `json:"startedAt"`
+	DurationMs int64  `json:"durationMs,omitempty"`
+}
+
 type Message struct {
-	ID    int64        `json:"id"`
-	Role  string       `json:"role"` // user | assistant | error
-	Text  string       `json:"text"`
-	Files []Attachment `json:"files,omitempty"`
-	Time  int64        `json:"time"` // unix seconds
+	ID         int64        `json:"id"`
+	Role       string       `json:"role"` // user | assistant | error
+	Text       string       `json:"text"`
+	Files      []Attachment `json:"files,omitempty"`
+	Activities []Activity   `json:"activities,omitempty"`
+	Time       int64        `json:"time"` // unix seconds
 }
 
 type Thread struct {
@@ -31,6 +43,8 @@ type Thread struct {
 	Title       string    `json:"title"`
 	SessionName string    `json:"sessionName"` // passed to hermes --continue
 	SessionID   string    `json:"sessionId,omitempty"`
+	Pinned      bool      `json:"pinned,omitempty"`
+	Archived    bool      `json:"archived,omitempty"`
 	Created     int64     `json:"created"`
 	Messages    []Message `json:"messages"`
 }
@@ -38,8 +52,20 @@ type Thread struct {
 type ThreadLite struct {
 	ID       string `json:"id"`
 	Title    string `json:"title"`
+	Pinned   bool   `json:"pinned,omitempty"`
+	Archived bool   `json:"archived,omitempty"`
 	Created  int64  `json:"created"`
 	LastTime int64  `json:"lastTime"`
+}
+
+type SearchHit struct {
+	ThreadID    string `json:"threadId"`
+	ThreadTitle string `json:"threadTitle"`
+	Archived    bool   `json:"archived,omitempty"`
+	MsgID       int64  `json:"msgId,omitempty"` // 0 when matching thread title only
+	Role        string `json:"role,omitempty"`
+	Snippet     string `json:"snippet"`
+	Time        int64  `json:"time"`
 }
 
 type UISnap struct {
@@ -111,7 +137,14 @@ func lite(t *Thread) ThreadLite {
 	if len(t.Messages) > 0 {
 		lt = t.Messages[len(t.Messages)-1].Time
 	}
-	return ThreadLite{ID: t.ID, Title: t.Title, Created: t.Created, LastTime: lt}
+	return ThreadLite{
+		ID:       t.ID,
+		Title:    t.Title,
+		Pinned:   t.Pinned,
+		Archived: t.Archived,
+		Created:  t.Created,
+		LastTime: lt,
+	}
 }
 
 func (s *Store) find(id string) *Thread {
@@ -229,10 +262,10 @@ func (s *Store) ReserveMsgID() int64 {
 	return id
 }
 
-func (s *Store) FinalizeAssistant(threadID string, id int64, text string, files []Attachment, sessionID string) Message {
+func (s *Store) FinalizeAssistant(threadID string, id int64, text string, files []Attachment, activities []Activity, sessionID string) Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	m := Message{ID: id, Role: "assistant", Text: text, Files: files, Time: nowSec()}
+	m := Message{ID: id, Role: "assistant", Text: text, Files: files, Activities: activities, Time: nowSec()}
 	if t := s.find(threadID); t != nil {
 		t.Messages = append(t.Messages, m)
 		if sessionID != "" {
@@ -260,4 +293,196 @@ func (s *Store) AddError(threadID string, text string) Message {
 		s.saveLocked()
 	}
 	return m
+}
+
+func (s *Store) RenameThread(id, title string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == "" {
+		id = s.active
+	}
+	t := s.find(id)
+	if t == nil {
+		return false
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return false
+	}
+	if len(title) > 80 {
+		title = title[:80] + "…"
+	}
+	t.Title = title
+	s.saveLocked()
+	return true
+}
+
+func (s *Store) SetPinned(id string, pinned bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == "" {
+		id = s.active
+	}
+	t := s.find(id)
+	if t == nil {
+		return false
+	}
+	t.Pinned = pinned
+	s.saveLocked()
+	return true
+}
+
+func (s *Store) SetArchived(id string, archived bool) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == "" {
+		id = s.active
+	}
+	t := s.find(id)
+	if t == nil {
+		return false
+	}
+	t.Archived = archived
+	if archived {
+		t.Pinned = false
+	}
+	if archived && s.active == id {
+		for _, other := range s.threads {
+			if other.ID != id && !other.Archived {
+				s.active = other.ID
+				break
+			}
+		}
+	}
+	s.saveLocked()
+	return true
+}
+
+func (s *Store) DeleteThread(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == "" {
+		id = s.active
+	}
+	idx := -1
+	for i, t := range s.threads {
+		if t.ID == id {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return false
+	}
+	s.threads = append(s.threads[:idx], s.threads[idx+1:]...)
+	if s.active == id {
+		s.active = ""
+		for _, t := range s.threads {
+			if !t.Archived {
+				s.active = t.ID
+				break
+			}
+		}
+		if s.active == "" && len(s.threads) > 0 {
+			s.active = s.threads[0].ID
+		}
+		if s.active == "" {
+			s.newThreadLocked()
+			return true
+		}
+	}
+	s.saveLocked()
+	return true
+}
+
+func (s *Store) ClearThread(id string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if id == "" {
+		id = s.active
+	}
+	t := s.find(id)
+	if t == nil {
+		return false
+	}
+	t.Messages = nil
+	t.SessionID = ""
+	t.SessionName = "webchat-" + time.Now().Format("20060102-150405") + "-" + t.ID
+	s.saveLocked()
+	return true
+}
+
+func makeSnippet(text, qLower string) string {
+	clean := strings.ReplaceAll(strings.TrimSpace(text), "\n", " ")
+	if len(clean) <= 140 {
+		return clean
+	}
+	lower := strings.ToLower(clean)
+	idx := strings.Index(lower, qLower)
+	if idx < 0 {
+		return clean[:140] + "…"
+	}
+	start := idx - 45
+	if start < 0 {
+		start = 0
+	}
+	end := idx + len(qLower) + 75
+	if end > len(clean) {
+		end = len(clean)
+	}
+	out := clean[start:end]
+	if start > 0 {
+		out = "…" + out
+	}
+	if end < len(clean) {
+		out += "…"
+	}
+	return out
+}
+
+func (s *Store) Search(query string, limit int) []SearchHit {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	q := strings.ToLower(strings.TrimSpace(query))
+	if q == "" {
+		return nil
+	}
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	var hits []SearchHit
+	for _, t := range s.threads {
+		matchedMsg := false
+		for i := len(t.Messages) - 1; i >= 0; i-- {
+			m := t.Messages[i]
+			if strings.Contains(strings.ToLower(m.Text), q) {
+				hits = append(hits, SearchHit{
+					ThreadID:    t.ID,
+					ThreadTitle: t.Title,
+					Archived:    t.Archived,
+					MsgID:       m.ID,
+					Role:        m.Role,
+					Snippet:     makeSnippet(m.Text, q),
+					Time:        m.Time,
+				})
+				matchedMsg = true
+				if len(hits) >= limit {
+					return hits
+				}
+			}
+		}
+		if !matchedMsg && strings.Contains(strings.ToLower(t.Title), q) {
+			hits = append(hits, SearchHit{
+				ThreadID:    t.ID,
+				ThreadTitle: t.Title,
+				Archived:    t.Archived,
+				Snippet:     t.Title,
+				Time:        lite(t).LastTime,
+			})
+			if len(hits) >= limit {
+				return hits
+			}
+		}
+	}
+	return hits
 }

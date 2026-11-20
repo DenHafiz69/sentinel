@@ -6,7 +6,7 @@
 <meta name="color-scheme" content="dark">
 <title>Sentinel</title>
 <link rel="manifest" href="/manifest.webmanifest">
-<meta name="theme-color" content="#17181b">
+<meta name="theme-color" content="#0e0f11">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -16,50 +16,85 @@
 <style>
 :root{
   --bg:#0e0f11; --side:#17181b; --side2:#1d1f23; --bubble-a:#212327; --bubble-u:#2b5278;
-  --txt:#e8eaed; --dim:#8a8f98; --line:#26282d; --accent:#6ab3f3; --err:#c0392b;
+  --txt:#e8eaed; --dim:#8a8f98; --line:#26282d; --accent:#6ab3f3; --err:#c0392b; --ok:#2ecc71;
 }
-*{box-sizing:border-box;margin:0;padding:0}
-html,body{height:100%}
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;height:100dvh;overscroll-behavior:none}
 body{font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--txt);overflow:hidden}
-#app{display:flex;height:100%;max-width:1200px;margin:0 auto}
+#app{display:flex;width:100%;height:100%;height:100dvh}
 /* sidebar */
-#sidebar{width:268px;background:var(--side);display:flex;flex-direction:column;border-right:1px solid var(--line);flex-shrink:0;transition:transform .2s}
-.sidehead{padding:12px 12px 8px}
-#newbtn{width:100%;padding:11px 14px;border:none;border-radius:10px;background:var(--accent);color:#08141f;font-weight:600;font-size:14px;cursor:pointer}
+#sidebar{width:296px;background:var(--side);display:flex;flex-direction:column;border-right:1px solid var(--line);flex-shrink:0;transition:transform .22s ease;padding-top:env(safe-area-inset-top);padding-left:env(safe-area-inset-left)}
+#backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:4}
+#backdrop.show{display:block}
+.sidehead{padding:12px 12px 8px;display:flex;flex-direction:column;gap:8px}
+#newbtn{width:100%;padding:10px 14px;border:none;border-radius:10px;background:var(--accent);color:#08141f;font-weight:600;font-size:14px;cursor:pointer}
 #newbtn:hover{filter:brightness(1.1)}
+.side-tools{display:flex;gap:6px;align-items:center}
+#searchbtn{flex:1;display:flex;align-items:center;justify-content:space-between;background:var(--side2);border:1px solid var(--line);border-radius:8px;color:var(--dim);padding:6px 10px;font-size:12.5px;cursor:pointer}
+#searchbtn:hover{border-color:var(--accent);color:var(--txt)}
+#searchbtn kbd{font:11px ui-monospace,monospace;background:#0e0f11;border:1px solid var(--line);border-radius:4px;padding:1px 5px;color:var(--dim)}
+#sortbtn{background:var(--side2);border:1px solid var(--line);border-radius:8px;color:var(--dim);padding:6px 9px;font-size:12px;cursor:pointer;white-space:nowrap}
+#sortbtn:hover{border-color:var(--accent);color:var(--txt)}
 #threads{flex:1;overflow-y:auto;padding:4px 8px}
-.thread{padding:10px 12px;border-radius:10px;cursor:pointer;margin-bottom:2px}
-.thread:hover{background:var(--side2)}
-.thread.active{background:var(--side2)}
-.thread .tt{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.thread{position:relative;display:flex;align-items:center;gap:6px;padding:9px 10px;border-radius:10px;cursor:pointer;margin-bottom:2px}
+.thread:hover,.thread.active{background:var(--side2)}
+.thread-main{flex:1;min-width:0}
+.thread .tt{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:5px}
 .thread.active .tt{color:white;font-weight:600}
-.thread .ts{font-size:11.5px;color:var(--dim);margin-top:2px}
-#me{padding:12px 14px;border-top:1px solid var(--line);font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.thread .pin-ic{font-size:11px;flex-shrink:0}
+.thread .ts{font-size:11px;color:var(--dim);margin-top:2px}
+.thread-act{opacity:0;background:none;border:none;color:var(--dim);cursor:pointer;padding:2px 6px;border-radius:6px;font-size:15px;line-height:1;flex-shrink:0}
+.thread:hover .thread-act,.thread.active .thread-act,.thread-act.open{opacity:1}
+.thread-act:hover{background:#2a2d33;color:var(--txt)}
+.tmenu{position:fixed;z-index:30;background:var(--side2);border:1px solid var(--line);border-radius:10px;padding:4px;min-width:150px;box-shadow:0 8px 24px rgba(0,0,0,.5)}
+.tmenu button{display:block;width:100%;text-align:left;background:none;border:none;color:var(--txt);padding:7px 10px;border-radius:7px;font-size:13px;cursor:pointer}
+.tmenu button:hover{background:#2a2d33}
+.tmenu button.danger{color:#ff7b6b}
+.arch-hdr{display:flex;align-items:center;justify-content:space-between;padding:8px 10px 4px;font-size:11.5px;color:var(--dim);cursor:pointer;user-select:none}
+.arch-hdr:hover{color:var(--txt)}
+#me{padding:11px 14px max(11px,env(safe-area-inset-bottom));border-top:1px solid var(--line);font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* main */
-main{flex:1;display:flex;flex-direction:column;min-width:0}
-header{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--bg)}
-#burger{display:none;background:none;border:none;color:var(--txt);font-size:20px;cursor:pointer}
+main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
+header{display:flex;align-items:center;gap:10px;padding:calc(10px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right)) 10px calc(18px + env(safe-area-inset-left));border-bottom:1px solid var(--line);background:var(--bg)}
+#burger{display:none;background:none;border:none;color:var(--txt);font-size:20px;cursor:pointer;min-width:36px;min-height:36px}
 header h1{font-size:16px;font-weight:600}
 #status{font-size:12px;color:var(--dim)}
 #status.busy{color:var(--accent)}
 #elapsed{font-size:12px;color:var(--dim);margin-left:6px}
-#stopbtn{margin-left:auto;background:var(--side2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+#hdr-search{display:none;background:var(--side2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:14px;cursor:pointer;min-height:36px}
+#stopbtn{background:var(--side2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;min-height:34px}
 #stopbtn:hover{border-color:var(--err);color:#ff8f7a}
 /* messages */
-#msgs{flex:1;overflow-y:auto;padding:18px 6% 10px;scroll-behavior:smooth}
-.msg{display:flex;margin:3px 0}
+#msgs{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:18px clamp(16px,4vw,48px) 10px;scroll-behavior:smooth}
+.msg{display:flex;margin:4px 0;transition:background .3s}
 .msg.user{justify-content:flex-end}
-.msg .bubble{max-width:72%;padding:8px 12px;border-radius:14px;background:var(--bubble-a);word-wrap:break-word;overflow-wrap:anywhere}
+.msg.jump-hit .bubble{outline:2px solid var(--accent);box-shadow:0 0 0 4px rgba(106,179,243,.2)}
+.msg .bubble{max-width:min(860px,78%);padding:9px 13px;border-radius:14px;background:var(--bubble-a);word-wrap:break-word;overflow-wrap:anywhere}
 .msg.user .bubble{background:var(--bubble-u);border-bottom-right-radius:4px}
 .msg.assistant .bubble{border-bottom-left-radius:4px}
 .msg.error .bubble{background:rgba(192,57,43,.15);border:1px solid rgba(192,57,43,.4)}
-.msg .time{font-size:10.5px;color:rgba(255,255,255,.45);margin-top:3px;text-align:right}
+.msg .time{font-size:10.5px;color:rgba(255,255,255,.45);margin-top:4px;text-align:right}
 .bubble .h{font-weight:700;margin:8px 0 3px}
 .bubble .li{margin:2px 0 2px 6px}
 .bubble a{color:var(--accent)}
-.bubble pre{background:#0b0c0e;border:1px solid var(--line);border-radius:8px;padding:9px 11px;overflow-x:auto;margin:7px 0;font-size:13px}
 .bubble code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;background:#0b0c0e;padding:1px 5px;border-radius:5px}
-.bubble pre code{background:none;padding:0}
+/* code blocks */
+.codeblock{background:#0b0c0e;border:1px solid var(--line);border-radius:10px;margin:8px 0;overflow:hidden}
+.codehdr{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;background:#131518;border-bottom:1px solid var(--line);font-size:11.5px;color:var(--dim)}
+.codelang{font-family:ui-monospace,monospace;text-transform:lowercase;color:#aab2bd}
+.codebtns{display:flex;gap:6px}
+.codebtn{background:var(--side2);border:1px solid var(--line);border-radius:6px;color:var(--dim);padding:2px 8px;font-size:11px;cursor:pointer}
+.codebtn:hover{border-color:var(--accent);color:var(--txt)}
+.codebody{display:flex;overflow-x:auto;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;line-height:1.5}
+.codeln{user-select:none;padding:9px 10px;text-align:right;color:#4f5560;border-right:1px solid #1b1d22;background:#0d0e11;flex-shrink:0}
+.codebody pre{margin:0;padding:9px 12px;background:none;border:none;overflow:visible;flex:1;white-space:pre}
+.codebody pre code{background:none;padding:0;font-size:inherit;white-space:pre}
+.tok-kw{color:#c792ea}
+.tok-str{color:#c3e88d}
+.tok-num{color:#f78c6c}
+.tok-cmt{color:#676e95;font-style:italic}
+/* attachments */
 .att-img{display:block;max-width:300px;max-height:300px;border-radius:9px;margin:6px 0}
 .att-file{display:flex;align-items:center;gap:9px;background:#0b0c0e;border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin:6px 0;color:var(--txt);text-decoration:none;max-width:320px}
 .att-file:hover{border-color:var(--accent)}
@@ -69,8 +104,39 @@ header h1{font-size:16px;font-weight:600}
 @keyframes blink{50%{opacity:0}}
 #empty{padding:60px 20px;text-align:center;color:var(--dim);font-size:14px;line-height:1.8}
 #empty b{color:var(--txt)}
-/* composer */
-#composer{padding:8px 6% 14px}
+/* activity panel */
+#activity-panel{margin:0 clamp(16px,4vw,48px) 6px;background:var(--side);border:1px solid var(--line);border-radius:10px;font-size:12.5px;overflow:hidden}
+#activity-panel[hidden]{display:none}
+.act-head{display:flex;align-items:center;gap:8px;padding:7px 11px;cursor:pointer;user-select:none}
+.act-head:hover{background:var(--side2)}
+.act-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1.2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
+.act-title{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.act-toggle{color:var(--dim);font-size:11px}
+.act-list{border-top:1px solid var(--line);max-height:180px;overflow-y:auto;padding:4px 8px}
+.act-item{display:flex;align-items:flex-start;gap:8px;padding:5px 4px;border-bottom:1px solid rgba(255,255,255,.04)}
+.act-item:last-child{border-bottom:none}
+.act-ic{width:16px;text-align:center;flex-shrink:0;font-size:12px}
+.act-ic.run{color:var(--accent)}
+.act-ic.done{color:var(--ok)}
+.act-ic.err{color:#ff7b6b}
+.act-body{flex:1;min-width:0}
+.act-name{font-weight:600;color:var(--txt)}
+.act-detail{color:var(--dim);font-size:11.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.act-err{color:#ff8f7a;font-size:11.5px;margin-top:2px}
+.act-dur{color:var(--dim);font-size:11px;flex-shrink:0}
+.msg-act{margin-top:6px;border-top:1px solid rgba(255,255,255,.07);padding-top:5px;font-size:12px}
+.msg-act summary{cursor:pointer;color:var(--dim);user-select:none}
+.msg-act summary:hover{color:var(--txt)}
+/* composer + slash popup */
+#composer{padding:8px clamp(16px,4vw,48px) max(14px,env(safe-area-inset-bottom));position:relative}
+#cmd-popup{position:absolute;left:clamp(16px,4vw,48px);right:clamp(16px,4vw,48px);bottom:100%;margin-bottom:4px;background:var(--side);border:1px solid var(--line);border-radius:12px;box-shadow:0 10px 28px rgba(0,0,0,.55);max-height:260px;overflow-y:auto;z-index:20;padding:4px}
+#cmd-popup[hidden]{display:none}
+.cmd-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 12px;border-radius:8px;cursor:pointer}
+.cmd-item:hover,.cmd-item.sel{background:var(--side2)}
+.cmd-left{display:flex;align-items:center;gap:10px;min-width:0}
+.cmd-usage{font-family:ui-monospace,monospace;font-size:13px;color:var(--accent);font-weight:600;white-space:nowrap}
+.cmd-desc{font-size:12.5px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
 .chip{display:flex;align-items:center;gap:8px;background:var(--side2);border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:13px;max-width:260px}
 .chip img{width:34px;height:34px;object-fit:cover;border-radius:6px}
@@ -83,21 +149,60 @@ header h1{font-size:16px;font-weight:600}
 #input:focus{border-color:#3a3f47}
 #send{background:var(--accent);border:none;border-radius:12px;color:#08141f;width:42px;height:42px;font-size:17px;cursor:pointer;flex-shrink:0}
 #send:hover{filter:brightness(1.1)}
-#toast{position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-70px);background:var(--side2);border:1px solid var(--line);border-radius:10px;padding:10px 18px;font-size:13.5px;transition:transform .25s;z-index:10;max-width:90vw}
+/* modals */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:40;display:flex;align-items:flex-start;justify-content:center;padding:8vh 16px}
+.modal-bg[hidden]{display:none}
+.modal{width:100%;max-width:560px;background:var(--side);border:1px solid var(--line);border-radius:14px;box-shadow:0 16px 40px rgba(0,0,0,.6);overflow:hidden}
+.modal-hdr{display:flex;align-items:center;gap:10px;padding:12px 14px;border-bottom:1px solid var(--line)}
+.modal-hdr h2{font-size:15px;font-weight:600;flex:1}
+.modal-close{background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer;padding:2px 6px}
+.modal-close:hover{color:var(--txt)}
+.modal-body{padding:12px 14px;max-height:60vh;overflow-y:auto}
+#search-in{width:100%;background:var(--side2);border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px 12px;font:inherit;outline:none}
+#search-in:focus{border-color:var(--accent)}
+#search-res{margin-top:10px;display:flex;flex-direction:column;gap:4px}
+.shit{padding:9px 11px;border-radius:9px;cursor:pointer;border:1px solid transparent}
+.shit:hover{background:var(--side2);border-color:var(--line)}
+.shit-top{display:flex;justify-content:space-between;font-size:12px;color:var(--dim);margin-bottom:3px}
+.shit-title{color:var(--txt);font-weight:600}
+.shit-snip{font-size:13px;color:#c7ccd4;line-height:1.4}
+.shit-snip mark,.shit-title mark{background:rgba(106,179,243,.28);color:#fff;border-radius:3px;padding:0 2px}
+.help-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.help-row:last-child{border-bottom:none}
+.confirm-btns{display:flex;justify-content:flex-end;gap:8px;margin-top:14px}
+.btn{background:var(--side2);border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:7px 14px;font-size:13px;cursor:pointer}
+.btn.primary{background:var(--accent);color:#08141f;border-color:var(--accent);font-weight:600}
+.btn.danger{background:var(--err);border-color:var(--err);color:#fff;font-weight:600}
+#toast{position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-70px);background:var(--side2);border:1px solid var(--line);border-radius:10px;padding:10px 18px;font-size:13.5px;transition:transform .25s;z-index:50;max-width:90vw}
 #toast.show{transform:translateX(-50%) translateY(0)}
 @media(max-width:760px){
-  #sidebar{position:fixed;z-index:5;height:100%;transform:translateX(-105%);box-shadow:0 0 40px rgba(0,0,0,.6)}
+  #sidebar{position:fixed;z-index:10;height:100%;height:100dvh;width:min(84vw,310px);transform:translateX(-105%);box-shadow:0 0 40px rgba(0,0,0,.6)}
   #sidebar.open{transform:translateX(0)}
-  #burger{display:block}
-  .msg .bubble{max-width:86%}
-  #msgs,#composer{padding-left:12px;padding-right:12px}
+  #burger,#hdr-search{display:inline-flex;align-items:center;justify-content:center}
+  #searchbtn kbd{display:none}
+  .msg .bubble{max-width:88%}
+  #msgs,#composer{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
+  #activity-panel{margin-left:max(12px,env(safe-area-inset-left));margin-right:max(12px,env(safe-area-inset-right))}
+  #cmd-popup{left:12px;right:12px}
+  .thread{min-height:44px}
+  .thread-act{opacity:1;min-width:34px;min-height:34px}
+  #input,#search-in,#prompt-in{font-size:16px}
+  #attach,#send{width:44px;height:44px}
+  .modal-bg{padding:max(16px,env(safe-area-inset-top)) 12px max(16px,env(safe-area-inset-bottom))}
 }
 </style>
 </head>
 <body>
 <div id="app">
+  <div id="backdrop"></div>
   <aside id="sidebar">
-    <div class="sidehead"><button id="newbtn">+ New chat</button></div>
+    <div class="sidehead">
+      <button id="newbtn">+ New chat</button>
+      <div class="side-tools">
+        <button id="searchbtn" title="Search conversations (Ctrl+K)"><span>🔍 Search</span><kbd>Ctrl+K</kbd></button>
+        <button id="sortbtn" title="Toggle sort order">Recent</button>
+      </div>
+    </div>
     <div id="threads"></div>
     <div id="me"></div>
   </aside>
@@ -108,46 +213,147 @@ header h1{font-size:16px;font-weight:600}
         <h1>Sentinel</h1>
         <div><span id="status">connecting…</span><span id="elapsed"></span></div>
       </div>
-      <button id="stopbtn" hidden>Stop</button>
+      <div class="hdr-right">
+        <button id="hdr-search" title="Search conversations">🔍</button>
+        <button id="stopbtn" hidden>Stop</button>
+      </div>
     </header>
     <div id="msgs"></div>
+    <div id="activity-panel" hidden></div>
     <div id="composer">
+      <div id="cmd-popup" hidden></div>
       <div id="chips"></div>
       <div class="row">
         <button id="attach" title="attach files">📎<input type="file" id="file" multiple hidden></button>
-        <textarea id="input" rows="1" placeholder="Message Sentinel…  /new starts a fresh chat" autocomplete="off"></textarea>
+        <textarea id="input" rows="1" placeholder="Message Sentinel…  type / for commands (Shift+Enter for newline)" autocomplete="off"></textarea>
         <button id="send">➤</button>
       </div>
     </div>
   </main>
 </div>
+
+<div id="search-modal" class="modal-bg" hidden>
+  <div class="modal">
+    <div class="modal-hdr">
+      <h2>Search conversations</h2>
+      <button class="modal-close" data-close="search-modal">×</button>
+    </div>
+    <div class="modal-body">
+      <input id="search-in" type="text" placeholder="Search messages and thread titles…" autocomplete="off">
+      <div id="search-res"></div>
+    </div>
+  </div>
+</div>
+
+<div id="help-modal" class="modal-bg" hidden>
+  <div class="modal">
+    <div class="modal-hdr">
+      <h2>Slash Commands</h2>
+      <button class="modal-close" data-close="help-modal">×</button>
+    </div>
+    <div class="modal-body" id="help-body"></div>
+  </div>
+</div>
+
+<div id="prompt-modal" class="modal-bg" hidden>
+  <div class="modal">
+    <div class="modal-hdr">
+      <h2 id="prompt-title">Rename</h2>
+      <button class="modal-close" data-close="prompt-modal">×</button>
+    </div>
+    <div class="modal-body">
+      <input id="prompt-in" type="text" style="width:100%;background:var(--side2);border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px 12px;font:inherit;outline:none">
+      <div class="confirm-btns">
+        <button class="btn" data-close="prompt-modal">Cancel</button>
+        <button class="btn primary" id="prompt-ok">Save</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="confirm-modal" class="modal-bg" hidden>
+  <div class="modal">
+    <div class="modal-hdr">
+      <h2 id="confirm-title">Confirm</h2>
+      <button class="modal-close" data-close="confirm-modal">×</button>
+    </div>
+    <div class="modal-body">
+      <p id="confirm-msg" style="font-size:14px;color:var(--txt)"></p>
+      <div class="confirm-btns">
+        <button class="btn" data-close="confirm-modal">Cancel</button>
+        <button class="btn danger" id="confirm-ok">Delete</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 <script>
 const $ = s => document.querySelector(s);
 const msgs = $('#msgs');
-let S = {threads:[], active:null, running:false, runningThread:null, queued:0};
+let S = {threads:[], active:null, running:false, runningThread:null, runningMsgId:0, activities:[], queued:0};
+let commands = [];
+let sortBy = localStorage.getItem('sentinel_sort') || 'recent';
+let showArchived = false;
+let actExpanded = false;
+let cmdIdx = 0;
+let cmdFiltered = [];
+let pendingJumpMsg = null;
 const streamBuf = {};    // msgID -> accumulated delta text
 const streamThread = {}; // msgID -> thread id
 const pending = [];      // uploads waiting to be sent
-let elapsedStart = 0, toastT = null;
+let elapsedStart = 0, toastT = null, searchT = null;
 
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function fmtSize(n){ if(n<1024)return n+' B'; if(n<1048576)return (n/1024).toFixed(1)+' KB'; return (n/1048576).toFixed(1)+' MB'; }
+function fmtDur(ms){ if(!ms||ms<0)return ''; if(ms<1000)return ms+'ms'; return (ms/1000).toFixed(1)+'s'; }
 function ago(ts){ const d=Date.now()/1000-ts; if(d<60)return 'now'; if(d<3600)return Math.floor(d/60)+'m'; if(d<86400)return Math.floor(d/3600)+'h'; return Math.floor(d/86400)+'d'; }
 function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),3500); }
 function api(path,body){ return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); }
+
+/* syntax highlighting & code blocks */
+const LANG_EXT = {go:'go',python:'py',py:'py',javascript:'js',js:'js',typescript:'ts',ts:'ts',bash:'sh',sh:'sh',zsh:'sh',json:'json',yaml:'yml',yml:'yml',sql:'sql',html:'html',css:'css',rust:'rs',rs:'rs',markdown:'md',md:'md'};
+const KW_RE = /\b(func|return|if|else|for|range|switch|case|default|break|continue|struct|interface|type|package|import|var|const|defer|go|select|chan|map|def|class|async|await|try|except|finally|with|as|from|import|lambda|yield|let|function|export|true|false|null|nil|None|True|False|SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|JOIN|CREATE|TABLE)\b/g;
+
+function highlightCode(raw){
+  // Escape first, then highlight comments, strings, numbers, and keywords safely.
+  const tokens = [];
+  const stash = (html) => { tokens.push(html); return '\x00'+(tokens.length-1)+'\x00'; };
+  let s = esc(raw);
+  s = s.replace(/(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/)/g, m => stash('<span class="tok-cmt">'+m+'</span>'));
+  s = s.replace(/(&quot;(?:\\.|[^&\n])*?&quot;|&#39;(?:\\.|[^&\n])*?&#39;|`[^`\n]*`)/g, m => stash('<span class="tok-str">'+m+'</span>'));
+  s = s.replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="tok-num">$1</span>');
+  s = s.replace(KW_RE, '<span class="tok-kw">$1</span>');
+  return s.replace(/\x00(\d+)\x00/g, (_,i) => tokens[i]);
+}
+
+function renderCodeBlock(block){
+  const nl = block.indexOf('\n');
+  let lang = 'text', code = block;
+  if(nl >= 0){
+    const first = block.slice(0, nl).trim();
+    if(/^[A-Za-z0-9_+\-]{1,20}$/.test(first)){ lang = first.toLowerCase(); code = block.slice(nl+1); }
+  }
+  code = code.replace(/\n$/, '');
+  const lines = code.split('\n');
+  const lnHtml = lines.map((_,i)=>(i+1)).join('\n');
+  const id = 'cb_' + Math.random().toString(36).slice(2,9);
+  codeStore[id] = {code, lang};
+  return '<div class="codeblock" data-cb="'+id+'">'+
+    '<div class="codehdr"><span class="codelang">'+esc(lang)+'</span>'+
+    '<div class="codebtns"><button class="codebtn" data-copy="'+id+'">Copy</button><button class="codebtn" data-dl="'+id+'">Download</button></div></div>'+
+    '<div class="codebody"><div class="codeln">'+lnHtml+'</div><pre><code>'+highlightCode(code)+'</code></pre></div>'+
+  '</div>';
+}
+const codeStore = {};
 
 /* mini markdown */
 function renderMD(src){
   const parts = String(src||'').split(/```/);
   let out = '';
   for(let i=0;i<parts.length;i++){
-    if(i%2===1){
-      let code = parts[i].replace(/^[A-Za-z0-9_+\-]*\n/,'');
-      out += '<pre><code>'+esc(code)+'</code></pre>';
-    } else {
-      out += inlineMD(parts[i]);
-    }
+    if(i%2===1){ out += renderCodeBlock(parts[i]); }
+    else { out += inlineMD(parts[i]); }
   }
   return out || '<br>';
 }
@@ -171,6 +377,32 @@ function filesHTML(files){
     return '<a class="att-file" href="'+url+'" download="'+esc(f.name)+'"><span>📄</span><span class="fname">'+esc(f.name)+'</span><span class="fsize">'+fmtSize(f.size)+'</span></a>';
   }).join('');
 }
+function actIcon(st){ if(st==='running') return '<span class="act-ic run">⟳</span>'; if(st==='error') return '<span class="act-ic err">✕</span>'; return '<span class="act-ic done">✓</span>'; }
+function activitiesListHTML(list){
+  return (list||[]).map(a=>{
+    const dur = a.durationMs ? fmtDur(a.durationMs) : (a.status==='running' && a.startedAt ? fmtDur(Date.now()-a.startedAt) : '');
+    return '<div class="act-item">'+actIcon(a.status)+
+      '<div class="act-body"><div class="act-name">'+esc(a.name)+'</div>'+
+      (a.detail?'<div class="act-detail">'+esc(a.detail)+'</div>':'')+
+      (a.error?'<div class="act-err">'+esc(a.error)+'</div>':'')+
+      '</div><div class="act-dur">'+esc(dur)+'</div></div>';
+  }).join('');
+}
+function renderActivityPanel(){
+  const p = $('#activity-panel');
+  const list = S.activities || [];
+  if(!S.running && list.length===0){ p.hidden = true; return; }
+  if(!S.running || S.runningThread !== S.active){ p.hidden = true; return; }
+  p.hidden = false;
+  const active = [...list].reverse().find(a=>a.status==='running');
+  const title = active ? (active.name + (active.detail ? ' — ' + active.detail : '')) : (list.length ? `${list.length} step(s)` : 'Starting…');
+  p.innerHTML = '<div class="act-head" id="act-head">' +
+    (S.running?'<span class="act-dot"></span>':'') +
+    '<span class="act-title">'+esc(title)+'</span>' +
+    '<span class="act-toggle">'+(actExpanded?'Hide':'Details ('+list.length+')')+'</span></div>' +
+    (actExpanded && list.length ? '<div class="act-list">'+activitiesListHTML(list)+'</div>' : '');
+  $('#act-head').onclick = ()=>{ actExpanded = !actExpanded; renderActivityPanel(); };
+}
 function bubble(m, streaming){
   const d=document.createElement('div');
   d.className='msg '+(m.role==='user'?'user':m.role==='error'?'error':'assistant');
@@ -182,6 +414,12 @@ function bubble(m, streaming){
   else if(m.role==='error'){ t.textContent=m.text; }
   else { t.innerHTML=renderMD(m.text); }
   b.appendChild(t);
+  if(!streaming && m.activities && m.activities.length){
+    const det = document.createElement('details');
+    det.className = 'msg-act';
+    det.innerHTML = '<summary>Activity ('+m.activities.length+' step'+(m.activities.length>1?'s':'')+')</summary><div class="act-list">'+activitiesListHTML(m.activities)+'</div>';
+    b.appendChild(det);
+  }
   const tm=document.createElement('div'); tm.className='time'; tm.textContent=new Date((m.time||0)*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
   b.appendChild(tm);
   d.appendChild(b);
@@ -195,19 +433,69 @@ function renderEmpty(){
   if(show && !e){
     e=document.createElement('div'); e.id='empty';
     e.innerHTML='Say hi — <b>Sentinel</b> is your Hermes agent in the browser.<br>'+
-      'Type <b>/new</b> any time to start a fresh chat (Enter ⇧ for newline).<br>'+
+      'Type <b>/</b> for commands or <b>Ctrl+K</b> to search conversations.<br>'+
       'Attach files or photos with 📎 — she can send files back too.';
     msgs.appendChild(e);
   } else if(!show && e){ e.remove(); }
 }
+
+/* threads + management */
+function sortThreads(list){
+  return [...list].sort((a,b)=>{
+    if(!!a.pinned !== !!b.pinned) return a.pinned ? -1 : 1;
+    const ka = sortBy==='created' ? (a.created||0) : (a.lastTime||a.created||0);
+    const kb = sortBy==='created' ? (b.created||0) : (b.lastTime||b.created||0);
+    return kb - ka;
+  });
+}
+let openMenu = null;
+function closeThreadMenu(){ if(openMenu){ openMenu.remove(); openMenu = null; } }
+function showThreadMenu(t, btn){
+  closeThreadMenu();
+  const r = btn.getBoundingClientRect();
+  const m = document.createElement('div');
+  m.className = 'tmenu';
+  m.style.top = Math.min(r.bottom + 4, innerHeight - 170) + 'px';
+  m.style.left = Math.min(r.left - 110, innerWidth - 165) + 'px';
+  const items = [
+    [t.pinned ? 'Unpin' : 'Pin to top', () => api('/api/thread/pin', {id:t.id, pinned:!t.pinned})],
+    ['Rename', () => openRenameModal(t)],
+    [t.archived ? 'Unarchive' : 'Archive', () => api('/api/thread/archive', {id:t.id, archived:!t.archived})],
+    ['Delete', () => openDeleteModal(t), true]
+  ];
+  for(const [label, fn, danger] of items){
+    const b = document.createElement('button');
+    if(danger) b.className = 'danger';
+    b.textContent = label;
+    b.onclick = (e) => { e.stopPropagation(); closeThreadMenu(); fn(); };
+    m.appendChild(b);
+  }
+  document.body.appendChild(m);
+  openMenu = m;
+}
+function threadRow(t){
+  const d=document.createElement('div');
+  d.className='thread'+(t.id===S.active?' active':'');
+  d.innerHTML='<div class="thread-main"><div class="tt">'+(t.pinned?'<span class="pin-ic">📌</span>':'')+'<span>'+esc(t.title)+'</span></div><div class="ts">'+ago(t.lastTime||t.created)+'</div></div>'+
+    '<button class="thread-act" title="Thread actions">⋯</button>';
+  d.onclick=()=>{ api('/api/active',{id:t.id}); if(innerWidth<=760) setSidebar(false); };
+  d.querySelector('.thread-act').onclick=(e)=>{ e.stopPropagation(); showThreadMenu(t, e.currentTarget); };
+  return d;
+}
 function renderThreads(){
+  closeThreadMenu();
+  $('#sortbtn').textContent = sortBy==='created' ? 'Created' : 'Recent';
   const el=$('#threads'); el.innerHTML='';
-  for(const t of S.threads){
-    const d=document.createElement('div');
-    d.className='thread'+(t.id===S.active?' active':'');
-    d.innerHTML='<div class="tt">'+esc(t.title)+'</div><div class="ts">'+ago(t.lastTime||t.created)+'</div>';
-    d.onclick=()=>{ api('/api/active',{id:t.id}); if(innerWidth<=760) $('#sidebar').classList.remove('open'); };
-    el.appendChild(d);
+  const activeList = sortThreads(S.threads.filter(t=>!t.archived));
+  const archList = sortThreads(S.threads.filter(t=>t.archived));
+  for(const t of activeList) el.appendChild(threadRow(t));
+  if(archList.length){
+    const hdr = document.createElement('div');
+    hdr.className = 'arch-hdr';
+    hdr.innerHTML = `<span>Archived (${archList.length})</span><span>${showArchived?'▾':'▸'}</span>`;
+    hdr.onclick = ()=>{ showArchived = !showArchived; renderThreads(); };
+    el.appendChild(hdr);
+    if(showArchived) for(const t of archList) el.appendChild(threadRow(t));
   }
 }
 function ensureStream(id){
@@ -228,6 +516,16 @@ function renderMessages(list){
     }
   }
   renderEmpty();
+  if(pendingJumpMsg){
+    const target = msgs.querySelector('.msg[data-id="'+pendingJumpMsg+'"]');
+    pendingJumpMsg = null;
+    if(target){
+      target.scrollIntoView({behavior:'smooth', block:'center'});
+      target.classList.add('jump-hit');
+      setTimeout(()=>target.classList.remove('jump-hit'), 2200);
+      return;
+    }
+  }
   scrollIfNear(true);
 }
 
@@ -235,10 +533,12 @@ function renderMessages(list){
 function applySnap(d){
   const wasRunning=S.running;
   S.threads=d.threads||[]; S.active=d.active;
-  S.running=!!d.running; S.runningThread=d.runningThread; S.queued=d.queued||0;
+  S.running=!!d.running; S.runningThread=d.runningThread; S.runningMsgId=d.runningMsgId||0;
+  S.activities=d.activities||[]; S.queued=d.queued||0;
   if(!wasRunning&&S.running) elapsedStart=Date.now();
   renderThreads();
   renderMessages(d.messages||[]);
+  renderActivityPanel();
   updateStatus();
 }
 function onMsg(d){
@@ -258,10 +558,15 @@ function onDelta(d){
   el.querySelector('.raw').textContent+=d.text;
   scrollIfNear();
 }
+function onActivity(d){
+  if(d.thread===S.active){ S.activities = d.activities||[]; renderActivityPanel(); }
+}
 function onStatus(d){
   const wasRunning=S.running;
-  S.running=!!d.running; S.runningThread=d.thread; S.queued=d.queued||0;
+  S.running=!!d.running; S.runningThread=d.thread; S.runningMsgId=d.msgId||0; S.queued=d.queued||0;
+  if(!S.running) S.activities=[];
   if(!wasRunning&&S.running) elapsedStart=Date.now();
+  renderActivityPanel();
   updateStatus();
 }
 function updateStatus(){
@@ -275,15 +580,160 @@ function updateStatus(){
     $('#elapsed').textContent=''; stop.hidden=true;
   }
 }
-setInterval(()=>{ if(S.running){ $('#elapsed').textContent=Math.floor((Date.now()-elapsedStart)/1000)+'s'; } },1000);
+setInterval(()=>{
+  if(S.running){
+    $('#elapsed').textContent=Math.floor((Date.now()-elapsedStart)/1000)+'s';
+    if(actExpanded) renderActivityPanel();
+  }
+},1000);
 
 /* SSE */
 function connect(){
   const es=new EventSource('/api/events');
   es.addEventListener('snapshot',e=>applySnap(JSON.parse(e.data)));
-  es.addEventListener('msg',    e=>onMsg(JSON.parse(e.data)));
+  es.addEventListener('msg',     e=>onMsg(JSON.parse(e.data)));
   es.addEventListener('delta',   e=>onDelta(JSON.parse(e.data)));
+  es.addEventListener('activity',e=>onActivity(JSON.parse(e.data)));
   es.addEventListener('status',  e=>onStatus(JSON.parse(e.data)));
+}
+
+/* modals */
+function openModal(id){ $('#'+id).hidden = false; }
+function closeModal(id){ $('#'+id).hidden = true; }
+document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => closeModal(b.dataset.close));
+document.querySelectorAll('.modal-bg').forEach(bg => bg.onclick = (e) => { if(e.target===bg) bg.hidden=true; });
+
+function openRenameModal(t){
+  const cur = t || S.threads.find(x=>x.id===S.active);
+  if(!cur) return;
+  $('#prompt-title').textContent = 'Rename thread';
+  const inp = $('#prompt-in');
+  inp.value = cur.title;
+  openModal('prompt-modal');
+  inp.focus(); inp.select();
+  const commit = () => {
+    const val = inp.value.trim();
+    if(val) api('/api/thread/rename', {id:cur.id, title:val});
+    closeModal('prompt-modal');
+  };
+  $('#prompt-ok').onclick = commit;
+  inp.onkeydown = (e) => { if(e.key==='Enter'){ e.preventDefault(); commit(); } };
+}
+function openDeleteModal(t){
+  $('#confirm-title').textContent = 'Delete conversation';
+  $('#confirm-msg').textContent = `Delete "${t.title}"? This removes it from Sentinel's sidebar.`;
+  openModal('confirm-modal');
+  $('#confirm-ok').onclick = () => { api('/api/thread/delete', {id:t.id}); closeModal('confirm-modal'); };
+}
+function openHelpModal(){
+  $('#help-body').innerHTML = commands.map(c =>
+    '<div class="help-row"><span class="cmd-usage">'+esc(c.usage)+'</span><span class="cmd-desc">'+esc(c.description)+'</span></div>'
+  ).join('');
+  openModal('help-modal');
+}
+
+/* search */
+function highlightTerm(text, q){
+  const safe = esc(text);
+  if(!q) return safe;
+  const re = new RegExp('('+q.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+')','ig');
+  return safe.replace(re, '<mark>$1</mark>');
+}
+function openSearchModal(initialQ){
+  openModal('search-modal');
+  const inp = $('#search-in');
+  inp.value = initialQ || '';
+  inp.focus();
+  runSearch(inp.value);
+}
+async function runSearch(q){
+  const resEl = $('#search-res');
+  q = q.trim();
+  if(!q){ resEl.innerHTML='<div style="color:var(--dim);font-size:13px;padding:8px 2px">Type to search across all thread titles and messages.</div>'; return; }
+  try{
+    const r = await fetch('/api/search?q='+encodeURIComponent(q));
+    const d = await r.json();
+    const hits = d.hits || [];
+    if(!hits.length){ resEl.innerHTML='<div style="color:var(--dim);font-size:13px;padding:8px 2px">No matches found.</div>'; return; }
+    resEl.innerHTML = '';
+    for(const h of hits){
+      const el = document.createElement('div');
+      el.className = 'shit';
+      el.innerHTML = '<div class="shit-top"><span class="shit-title">'+highlightTerm(h.threadTitle, q)+(h.archived?' (archived)':'')+'</span><span>'+ago(h.time)+'</span></div>'+
+        '<div class="shit-snip">'+highlightTerm(h.snippet, q)+'</div>';
+      el.onclick = () => {
+        closeModal('search-modal');
+        if(h.msgId) pendingJumpMsg = h.msgId;
+        if(h.threadId === S.active && h.msgId){
+          const target = msgs.querySelector('.msg[data-id="'+h.msgId+'"]');
+          if(target){
+            pendingJumpMsg = null;
+            target.scrollIntoView({behavior:'smooth', block:'center'});
+            target.classList.add('jump-hit');
+            setTimeout(()=>target.classList.remove('jump-hit'), 2200);
+          }
+        } else {
+          api('/api/active', {id: h.threadId});
+        }
+      };
+      resEl.appendChild(el);
+    }
+  }catch(_){}
+}
+$('#search-in').addEventListener('input', e => {
+  clearTimeout(searchT);
+  searchT = setTimeout(() => runSearch(e.target.value), 120);
+});
+
+/* slash command autocomplete */
+function updateCmdPopup(){
+  const val = $('#input').value;
+  const pop = $('#cmd-popup');
+  if(!val.startsWith('/') || val.includes('\n') || val.includes(' ')){
+    pop.hidden = true; cmdFiltered = []; return;
+  }
+  const q = val.toLowerCase();
+  cmdFiltered = commands.filter(c => c.name.startsWith(q));
+  if(!cmdFiltered.length){ pop.hidden = true; return; }
+  if(cmdIdx >= cmdFiltered.length) cmdIdx = 0;
+  pop.hidden = false;
+  pop.innerHTML = cmdFiltered.map((c,i) =>
+    '<div class="cmd-item'+(i===cmdIdx?' sel':'')+'" data-i="'+i+'">'+
+      '<div class="cmd-left"><span class="cmd-usage">'+esc(c.usage)+'</span></div>'+
+      '<span class="cmd-desc">'+esc(c.description)+'</span>'+
+    '</div>'
+  ).join('');
+  pop.querySelectorAll('.cmd-item').forEach(el => {
+    el.onclick = () => selectCommand(cmdFiltered[Number(el.dataset.i)]);
+  });
+}
+function selectCommand(c){
+  if(!c) return;
+  $('#cmd-popup').hidden = true;
+  if(c.takesArgs){
+    $('#input').value = c.name + ' ';
+    autosize();
+    $('#input').focus();
+  } else {
+    $('#input').value = '';
+    autosize();
+    execSlashCommand(c.name, '');
+  }
+}
+function execSlashCommand(cmd, arg){
+  switch(cmd){
+    case '/new': newChat(); return true;
+    case '/help': openHelpModal(); return true;
+    case '/clear': api('/api/thread/clear', {id:S.active}); return true;
+    case '/rename':
+      if(arg) api('/api/thread/rename', {id:S.active, title:arg});
+      else openRenameModal();
+      return true;
+    case '/search': openSearchModal(arg); return true;
+    case '/archive': api('/api/thread/archive', {id:S.active, archived:true}); return true;
+    case '/stop': api('/api/stop'); return true;
+  }
+  return false;
 }
 
 /* composer */
@@ -298,22 +748,52 @@ function renderChips(){
     d.appendChild(x); c.appendChild(d);
   });
 }
-function newChat(){ api('/api/new'); if(innerWidth<=760) $('#sidebar').classList.remove('open'); }
+function setSidebar(open){
+  $('#sidebar').classList.toggle('open', !!open);
+  $('#backdrop').classList.toggle('show', !!open);
+}
+function newChat(){ api('/api/new'); if(innerWidth<=760) setSidebar(false); }
 function send(){
   const el=$('#input'); const text=el.value.trim();
-  if(text==='/new'){ el.value=''; autosize(); return newChat(); }
+  if(text.startsWith('/')){
+    const sp = text.indexOf(' ');
+    const cmd = (sp<0 ? text : text.slice(0,sp)).toLowerCase();
+    const arg = sp<0 ? '' : text.slice(sp+1).trim();
+    if(execSlashCommand(cmd, arg)){
+      el.value=''; autosize(); $('#cmd-popup').hidden=true; return;
+    }
+  }
   if(!text && !pending.length) return;
   const files=pending.map(f=>({path:f.path,name:f.name}));
   pending.length=0; renderChips();
-  el.value=''; autosize();
+  el.value=''; autosize(); $('#cmd-popup').hidden=true;
   api('/api/send',{text,files}).then(r=>{ if(!r.ok) r.text().then(t=>toast('send failed: '+t)); })
     .catch(e=>toast('send failed: '+e));
 }
+
+/* events */
 $('#send').onclick=send;
-$('#input').addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } });
-$('#input').addEventListener('input',autosize);
+$('#input').addEventListener('keydown',e=>{
+  const pop = $('#cmd-popup');
+  if(!pop.hidden && cmdFiltered.length){
+    if(e.key==='ArrowDown'){ e.preventDefault(); cmdIdx=(cmdIdx+1)%cmdFiltered.length; updateCmdPopup(); return; }
+    if(e.key==='ArrowUp'){ e.preventDefault(); cmdIdx=(cmdIdx-1+cmdFiltered.length)%cmdFiltered.length; updateCmdPopup(); return; }
+    if(e.key==='Tab' || (e.key==='Enter' && !e.shiftKey)){ e.preventDefault(); selectCommand(cmdFiltered[cmdIdx]); return; }
+    if(e.key==='Escape'){ e.preventDefault(); pop.hidden=true; return; }
+  }
+  if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); }
+});
+$('#input').addEventListener('input',()=>{ autosize(); cmdIdx=0; updateCmdPopup(); });
 $('#newbtn').onclick=newChat;
-$('#burger').onclick=()=>$('#sidebar').classList.toggle('open');
+$('#searchbtn').onclick=()=>openSearchModal('');
+$('#sortbtn').onclick=()=>{
+  sortBy = sortBy==='recent' ? 'created' : 'recent';
+  localStorage.setItem('sentinel_sort', sortBy);
+  renderThreads();
+};
+$('#burger').onclick=()=>setSidebar(!$('#sidebar').classList.contains('open'));
+$('#backdrop').onclick=()=>setSidebar(false);
+$('#hdr-search').onclick=()=>openSearchModal('');
 $('#stopbtn').onclick=()=>api('/api/stop');
 $('#attach').onclick=()=>$('#file').click();
 $('#file').addEventListener('change',async e=>{
@@ -329,10 +809,54 @@ $('#file').addEventListener('change',async e=>{
   e.target.value=''; renderChips();
 });
 
+msgs.addEventListener('click', e => {
+  const cp = e.target.closest('[data-copy]');
+  if(cp){
+    const item = codeStore[cp.dataset.copy];
+    if(item && navigator.clipboard){
+      navigator.clipboard.writeText(item.code).then(()=>{
+        cp.textContent='Copied'; setTimeout(()=>cp.textContent='Copy',1500);
+      });
+    }
+    return;
+  }
+  const dl = e.target.closest('[data-dl]');
+  if(dl){
+    const item = codeStore[dl.dataset.dl];
+    if(item){
+      const ext = LANG_EXT[item.lang] || 'txt';
+      const blob = new Blob([item.code], {type:'text/plain;charset=utf-8'});
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'snippet.'+ext;
+      a.click();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+    }
+  }
+});
+
+document.addEventListener('click', () => closeThreadMenu());
+window.addEventListener('keydown', e => {
+  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='k'){
+    e.preventDefault();
+    openSearchModal('');
+  } else if(e.key==='Escape'){
+    closeThreadMenu();
+    setSidebar(false);
+    ['search-modal','help-modal','prompt-modal','confirm-modal'].forEach(closeModal);
+    $('#cmd-popup').hidden = true;
+  }
+});
+
 /* boot */
 fetch('/api/me').then(r=>r.json()).then(d=>{ $('#me').textContent=d.dev?'dev mode':'signed in as '+d.email; }).catch(()=>{});
+fetch('/api/commands').then(r=>r.json()).then(d=>{ commands=d.commands||[]; }).catch(()=>{});
 fetch('/api/state').then(r=>r.json()).then(applySnap).catch(()=>{});
 connect();
+if(new URLSearchParams(location.search).get('new')==='1'){
+  history.replaceState(null,'','/');
+  api('/api/new');
+}
 $('#input').focus();
 if ('serviceWorker' in navigator) {
   addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(()=>{}));

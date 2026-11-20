@@ -21,6 +21,7 @@ import (
 type AgentResult struct {
 	Text       string
 	SessionID  string
+	Activities []Activity
 	Stopped    bool // cancelled via /api/stop
 	StderrTail string
 	Err        error
@@ -63,7 +64,75 @@ func shorten(s string) string {
 	return s
 }
 
-func runHermes(ctx context.Context, sessionName, query string, onDelta func(string)) AgentResult {
+type streamEvent struct {
+	Type      string          `json:"type"`
+	Text      string          `json:"text"`
+	SessionID string          `json:"session_id"`
+	ExitCode  int             `json:"exit_code"`
+	ID        string          `json:"id"`
+	ToolID    string          `json:"tool_id"`
+	CallID    string          `json:"call_id"`
+	Name      string          `json:"name"`
+	Tool      string          `json:"tool"`
+	ToolName  string          `json:"tool_name"`
+	Input     json.RawMessage `json:"input"`
+	Args      json.RawMessage `json:"args"`
+	Arguments json.RawMessage `json:"arguments"`
+	Status    string          `json:"status"`
+	Message   string          `json:"message"`
+	Error     string          `json:"error"`
+	IsError   bool            `json:"is_error"`
+	Duration  int64           `json:"duration_ms"`
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return strings.TrimSpace(v)
+		}
+	}
+	return ""
+}
+
+func summarizeJSON(raws ...json.RawMessage) string {
+	for _, raw := range raws {
+		if len(raw) == 0 || string(raw) == "null" {
+			continue
+		}
+		var m map[string]any
+		if json.Unmarshal(raw, &m) == nil && len(m) > 0 {
+			var parts []string
+			for k, v := range m {
+				s := fmt.Sprintf("%v", v)
+				if len(s) > 48 {
+					s = s[:48] + "…"
+				}
+				parts = append(parts, k+"="+s)
+				if len(parts) >= 3 {
+					break
+				}
+			}
+			return strings.Join(parts, ", ")
+		}
+		s := strings.TrimSpace(string(raw))
+		if len(s) > 100 {
+			s = s[:100] + "…"
+		}
+		return s
+	}
+	return ""
+}
+
+func cloneActivities(src []Activity) []Activity {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]Activity, len(src))
+	copy(out, src)
+	return out
+}
+
+func runHermes(ctx context.Context, sessionName, query string, onDelta func(string), onActivity func([]Activity)) AgentResult {
 	var res AgentResult
 	qf, err := os.CreateTemp(dataDir, "q-*.txt")
 	if err != nil {
@@ -105,6 +174,13 @@ func runHermes(ctx context.Context, sessionName, query string, onDelta func(stri
 		return res
 	}
 
+	var activities []Activity
+	emitAct := func() {
+		if onActivity != nil {
+			onActivity(cloneActivities(activities))
+		}
+	}
+
 	sc := bufio.NewScanner(stdout)
 	sc.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for sc.Scan() {
@@ -112,23 +188,119 @@ func runHermes(ctx context.Context, sessionName, query string, onDelta func(stri
 		if len(line) == 0 || line[0] != '{' {
 			continue
 		}
-		var ev struct {
-			Type      string `json:"type"`
-			Text      string `json:"text"`
-			SessionID string `json:"session_id"`
-			ExitCode  int    `json:"exit_code"`
-		}
+		var ev streamEvent
 		if err := json.Unmarshal(line, &ev); err != nil {
 			continue
 		}
+		nowMs := time.Now().UnixMilli()
 		switch ev.Type {
 		case "text":
 			if ev.Text != "" {
+				// Mark any active thinking step complete when text starts arriving.
+				for i := len(activities) - 1; i >= 0; i-- {
+					if activities[i].Kind == "thinking" && activities[i].Status == "running" {
+						activities[i].Status = "done"
+						activities[i].DurationMs = nowMs - activities[i].StartedAt
+						emitAct()
+						break
+					}
+				}
 				res.Text += ev.Text
 				if onDelta != nil {
 					onDelta(ev.Text)
 				}
 			}
+		case "thinking", "reasoning":
+			found := false
+			for i := len(activities) - 1; i >= 0; i-- {
+				if activities[i].Kind == "thinking" && activities[i].Status == "running" {
+					found = true
+					break
+				}
+			}
+			if !found {
+				activities = append(activities, Activity{
+					ID:        fmt.Sprintf("act-%d", len(activities)+1),
+					Kind:      "thinking",
+					Name:      "Reasoning",
+					Status:    "running",
+					StartedAt: nowMs,
+				})
+				emitAct()
+			}
+		case "tool_use", "tool_call", "tool_start":
+			id := firstNonEmpty(ev.ID, ev.ToolID, ev.CallID, fmt.Sprintf("tool-%d", len(activities)+1))
+			name := firstNonEmpty(ev.Name, ev.ToolName, ev.Tool, "tool")
+			detail := summarizeJSON(ev.Input, ev.Args, ev.Arguments)
+			activities = append(activities, Activity{
+				ID:        id,
+				Kind:      "tool",
+				Name:      name,
+				Detail:    detail,
+				Status:    "running",
+				StartedAt: nowMs,
+			})
+			emitAct()
+		case "tool_result", "tool_end", "tool_error":
+			id := firstNonEmpty(ev.ID, ev.ToolID, ev.CallID)
+			name := firstNonEmpty(ev.Name, ev.ToolName, ev.Tool)
+			status := "done"
+			if ev.Type == "tool_error" || ev.IsError || ev.Error != "" || ev.Status == "error" {
+				status = "error"
+			}
+			errMsg := firstNonEmpty(ev.Error)
+			matched := false
+			for i := len(activities) - 1; i >= 0; i-- {
+				if activities[i].Kind != "tool" || activities[i].Status != "running" {
+					continue
+				}
+				if (id != "" && activities[i].ID == id) || (id == "" && (name == "" || activities[i].Name == name)) {
+					activities[i].Status = status
+					activities[i].Error = errMsg
+					if ev.Duration > 0 {
+						activities[i].DurationMs = ev.Duration
+					} else {
+						activities[i].DurationMs = nowMs - activities[i].StartedAt
+					}
+					matched = true
+					break
+				}
+			}
+			if !matched && name != "" {
+				activities = append(activities, Activity{
+					ID:         firstNonEmpty(id, fmt.Sprintf("tool-%d", len(activities)+1)),
+					Kind:       "tool",
+					Name:       name,
+					Status:     status,
+					Error:      errMsg,
+					StartedAt:  nowMs,
+					DurationMs: ev.Duration,
+				})
+			}
+			emitAct()
+		case "status":
+			msg := firstNonEmpty(ev.Message, ev.Status, ev.Text)
+			if msg != "" {
+				activities = append(activities, Activity{
+					ID:        fmt.Sprintf("st-%d", len(activities)+1),
+					Kind:      "status",
+					Name:      msg,
+					Status:    "done",
+					StartedAt: nowMs,
+				})
+				emitAct()
+			}
+		case "error":
+			errMsg := firstNonEmpty(ev.Error, ev.Message, ev.Text, "agent error")
+			activities = append(activities, Activity{
+				ID:        fmt.Sprintf("err-%d", len(activities)+1),
+				Kind:      "status",
+				Name:      "Error",
+				Status:    "error",
+				Error:     errMsg,
+				StartedAt: nowMs,
+			})
+			emitAct()
 		case "result":
 			res.SessionID = ev.SessionID
 			if ev.Text != "" {
@@ -139,6 +311,20 @@ func runHermes(ctx context.Context, sessionName, query string, onDelta func(stri
 	_ = sc.Err()
 	werr := cmd.Wait()
 	res.StderrTail = errb.Tail()
+
+	// Close out any still-running activities when the process exits.
+	endMs := time.Now().UnixMilli()
+	for i := range activities {
+		if activities[i].Status == "running" {
+			if ctx.Err() != nil {
+				activities[i].Status = "error"
+			} else {
+				activities[i].Status = "done"
+			}
+			activities[i].DurationMs = endMs - activities[i].StartedAt
+		}
+	}
+	res.Activities = activities
 
 	switch ctx.Err() {
 	case context.DeadlineExceeded:

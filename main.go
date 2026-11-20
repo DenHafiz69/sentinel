@@ -59,6 +59,8 @@ type Server struct {
 	mu            sync.Mutex
 	running       bool
 	runningThread string
+	runningMsgID  int64
+	activities    []Activity
 	cancel        context.CancelFunc
 }
 
@@ -134,22 +136,24 @@ func (s *Server) broadcast(kind string, data any) {
 	s.hub.Send([]byte(fmt.Sprintf("event: %s\ndata: %s\n\n", kind, b)))
 }
 
-func (s *Server) runningState() (bool, string, int) {
+func (s *Server) runningState() (bool, string, int64, []Activity, int) {
 	s.mu.Lock()
-	r, t := s.running, s.runningThread
+	r, t, m, act := s.running, s.runningThread, s.runningMsgID, cloneActivities(s.activities)
 	s.mu.Unlock()
-	return r, t, len(s.jobs)
+	return r, t, m, act, len(s.jobs)
 }
 
 func (s *Server) snapshotPayload() map[string]any {
 	snap := s.store.Snapshot()
-	r, t, q := s.runningState()
+	r, t, m, act, q := s.runningState()
 	return map[string]any{
 		"threads":       snap.Threads,
 		"active":        snap.Active,
 		"messages":      snap.Messages,
 		"running":       r,
 		"runningThread": t,
+		"runningMsgId":  m,
+		"activities":    act,
 		"queued":        q,
 	}
 }
@@ -212,19 +216,28 @@ func (s *Server) runJob(job Job) {
 	s.mu.Lock()
 	s.running = true
 	s.runningThread = job.Thread
+	s.runningMsgID = job.MsgID
+	s.activities = nil
 	s.cancel = cancel
 	s.mu.Unlock()
-	s.broadcast("status", map[string]any{"running": true, "thread": job.Thread, "queued": len(s.jobs)})
+	s.broadcast("status", map[string]any{"running": true, "thread": job.Thread, "msgId": job.MsgID, "queued": len(s.jobs)})
 
 	session := s.store.SessionName(job.Thread)
 	res := runHermes(ctx, session, job.Query, func(delta string) {
 		s.broadcast("delta", map[string]any{"thread": job.Thread, "id": job.MsgID, "text": delta})
+	}, func(acts []Activity) {
+		s.mu.Lock()
+		s.activities = acts
+		s.mu.Unlock()
+		s.broadcast("activity", map[string]any{"thread": job.Thread, "msgId": job.MsgID, "activities": acts})
 	})
 
 	cancel()
 	s.mu.Lock()
 	s.running = false
 	s.runningThread = ""
+	s.runningMsgID = 0
+	s.activities = nil
 	s.cancel = nil
 	s.mu.Unlock()
 
@@ -239,13 +252,13 @@ func (s *Server) runJob(job Job) {
 		s.broadcast("msg", map[string]any{"thread": job.Thread, "message": m})
 	case res.Stopped:
 		text := res.Text + "\n\n_[stopped]_"
-		m := s.store.FinalizeAssistant(job.Thread, job.MsgID, text, extractAttachments(text), res.SessionID)
+		m := s.store.FinalizeAssistant(job.Thread, job.MsgID, text, extractAttachments(text), res.Activities, res.SessionID)
 		s.broadcast("msg", map[string]any{"thread": job.Thread, "message": m})
 	default:
-		m := s.store.FinalizeAssistant(job.Thread, job.MsgID, res.Text, extractAttachments(res.Text), res.SessionID)
+		m := s.store.FinalizeAssistant(job.Thread, job.MsgID, res.Text, extractAttachments(res.Text), res.Activities, res.SessionID)
 		s.broadcast("msg", map[string]any{"thread": job.Thread, "message": m})
 	}
-	s.broadcast("status", map[string]any{"running": false, "thread": "", "queued": len(s.jobs)})
+	s.broadcast("status", map[string]any{"running": false, "thread": "", "msgId": 0, "queued": len(s.jobs)})
 }
 
 // ---------- handlers ----------
@@ -355,6 +368,78 @@ func (s *Server) handleActive(w http.ResponseWriter, r *http.Request) {
 		ID string `json:"id"`
 	}
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil || !s.store.SetActive(req.ID) {
+		http.Error(w, "no such thread", http.StatusBadRequest)
+		return
+	}
+	s.broadcast("snapshot", s.snapshotPayload())
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query().Get("q")
+	hits := s.store.Search(q, 50)
+	if hits == nil {
+		hits = []SearchHit{}
+	}
+	writeJSON(w, map[string]any{"hits": hits})
+}
+
+func (s *Server) handleThreadRename(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID    string `json:"id"`
+		Title string `json:"title"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil || !s.store.RenameThread(req.ID, req.Title) {
+		http.Error(w, "invalid thread or title", http.StatusBadRequest)
+		return
+	}
+	s.broadcast("snapshot", s.snapshotPayload())
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (s *Server) handleThreadPin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID     string `json:"id"`
+		Pinned bool   `json:"pinned"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil || !s.store.SetPinned(req.ID, req.Pinned) {
+		http.Error(w, "no such thread", http.StatusBadRequest)
+		return
+	}
+	s.broadcast("snapshot", s.snapshotPayload())
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (s *Server) handleThreadArchive(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID       string `json:"id"`
+		Archived bool   `json:"archived"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil || !s.store.SetArchived(req.ID, req.Archived) {
+		http.Error(w, "no such thread", http.StatusBadRequest)
+		return
+	}
+	s.broadcast("snapshot", s.snapshotPayload())
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil || !s.store.DeleteThread(req.ID) {
+		http.Error(w, "no such thread", http.StatusBadRequest)
+		return
+	}
+	s.broadcast("snapshot", s.snapshotPayload())
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (s *Server) handleThreadClear(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil || !s.store.ClearThread(req.ID) {
 		http.Error(w, "no such thread", http.StatusBadRequest)
 		return
 	}
@@ -626,9 +711,16 @@ func main() {
 	mux.HandleFunc("GET /apple-touch-icon.png", srv.authed(srv.serveWebAsset))
 	mux.HandleFunc("GET /api/state", srv.authed(srv.handleState))
 	mux.HandleFunc("GET /api/me", srv.authed(srv.handleMe))
+	mux.HandleFunc("GET /api/commands", srv.authed(srv.handleCommands))
+	mux.HandleFunc("GET /api/search", srv.authed(srv.handleSearch))
 	mux.HandleFunc("GET /api/events", srv.authed(srv.handleEvents))
 	mux.HandleFunc("POST /api/new", srv.authed(srv.handleNew))
 	mux.HandleFunc("POST /api/active", srv.authed(srv.handleActive))
+	mux.HandleFunc("POST /api/thread/rename", srv.authed(srv.handleThreadRename))
+	mux.HandleFunc("POST /api/thread/pin", srv.authed(srv.handleThreadPin))
+	mux.HandleFunc("POST /api/thread/archive", srv.authed(srv.handleThreadArchive))
+	mux.HandleFunc("POST /api/thread/delete", srv.authed(srv.handleThreadDelete))
+	mux.HandleFunc("POST /api/thread/clear", srv.authed(srv.handleThreadClear))
 	mux.HandleFunc("POST /api/send", srv.authed(srv.handleSend))
 	mux.HandleFunc("POST /api/stop", srv.authed(srv.handleStop))
 	mux.HandleFunc("POST /api/upload", srv.authed(srv.handleUpload))
