@@ -180,7 +180,13 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
 #attach{background:var(--side2);border:1px solid var(--line);border-radius:12px;color:var(--txt);width:42px;height:42px;font-size:17px;cursor:pointer;flex-shrink:0}
 #attach:hover{border-color:var(--accent)}
 #input{flex:1;resize:none;border:1px solid var(--line);background:var(--side2);color:var(--txt);border-radius:12px;padding:10px 14px;font:inherit;line-height:1.35;min-height:44px;max-height:160px;overflow-y:auto;outline:none}
+#input::placeholder{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #input:focus{border-color:#3a3f47}
+.mobile-only{display:none}
+@media(max-width:760px),(hover:none) and (pointer:coarse){
+  .desktop-only{display:none !important}
+  .mobile-only{display:inline}
+}
 #send{background:var(--accent);border:none;border-radius:12px;color:#08141f;width:42px;height:42px;font-size:17px;cursor:pointer;flex-shrink:0}
 #send:hover{filter:brightness(1.1)}
 /* modals */
@@ -302,7 +308,7 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
     <div class="sidehead">
       <button id="newbtn">+ New chat</button>
       <div class="side-tools">
-        <button id="searchbtn" title="Search conversations (Ctrl+K)"><span>🔍 Search</span><kbd>Ctrl+K</kbd></button>
+        <button id="searchbtn" title="Search conversations (Ctrl+K)"><span>🔍 Search</span><kbd class="desktop-only">Ctrl+K</kbd></button>
         <button id="sortbtn" title="Toggle sort order">Recent</button>
       </div>
     </div>
@@ -334,7 +340,7 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
       <div id="chips"></div>
       <div class="row">
         <button id="attach" title="attach files" aria-label="Attach files">📎<input type="file" id="file" multiple hidden></button>
-        <textarea id="input" rows="1" placeholder="Message Sentinel… (/ for commands)" autocomplete="off" aria-label="Message Sentinel"></textarea>
+        <textarea id="input" rows="1" placeholder="Message Sentinel…" autocomplete="off" aria-label="Message Sentinel"></textarea>
         <button id="send" aria-label="Send message">➤</button>
       </div>
     </div>
@@ -624,9 +630,7 @@ function renderEmpty(){
   if(show && !e){
     e=document.createElement('div'); e.id='empty';
     e.innerHTML='Say hi — <b>Sentinel</b> is your Hermes agent in the browser.<br>'+
-      (isTouch
-        ? 'Type <b>/</b> for commands, or tap 🔍 to search conversations.<br>'
-        : 'Type <b>/</b> for commands or <b>Ctrl+K</b> to search conversations.<br>')+
+      'Type <b>/</b> for commands<span class="desktop-only"> or <b>Ctrl+K</b> to search conversations</span><span class="mobile-only">, or tap 🔍 to search</span>.<br>'+
       'Attach files or photos with 📎 — she can send files back too.';
     msgs.appendChild(e);
   } else if(!show && e){ e.remove(); }
