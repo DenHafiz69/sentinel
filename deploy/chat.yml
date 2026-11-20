@@ -1,0 +1,16 @@
+tunnel: <your-tunnel-uuid>
+credentials-file: /home/you/.cloudflared/<your-tunnel-uuid>.json
+
+# Sentinel listens on 127.0.0.1:9121 only; this tunnel plus the Cloudflare
+# Access app on your hostname is the single public entry point. Never remove
+# the Access app while this hostname is routed.
+ingress:
+  - hostname: chat.example.com
+    service: http://127.0.0.1:9121
+    originRequest:
+      connectTimeout: 30s
+      noHappyEyeballs: true
+      disableChunkedEncoding: false
+      # The chat keeps an SSE stream open; do not cut idle sockets short.
+      keepAliveTimeout: 90s
+  - service: http_status:404

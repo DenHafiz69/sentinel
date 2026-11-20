@@ -1,0 +1,643 @@
+package main
+
+import (
+	"context"
+	"embed"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"mime"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+)
+
+//go:embed web
+var webFS embed.FS
+
+var (
+	homeDir string
+	homeBin string
+	dataDir string
+)
+
+func init() {
+	hd, err := os.UserHomeDir()
+	if err != nil {
+		log.Fatalf("no home dir: %v", err)
+	}
+	homeDir = hd
+	homeBin = filepath.Join(homeDir, ".local", "bin")
+}
+
+func envOr(k, def string) string {
+	if v := os.Getenv(k); v != "" {
+		return v
+	}
+	return def
+}
+
+type Job struct {
+	Thread string
+	MsgID  int64
+	Query  string
+}
+
+type Server struct {
+	store     *Store
+	hub       *Hub
+	auth      *AccessAuth
+	dev       bool
+	uploadDir string
+
+	jobs chan Job
+
+	mu            sync.Mutex
+	running       bool
+	runningThread string
+	cancel        context.CancelFunc
+}
+
+type ctxKey int
+
+const emailKey ctxKey = 1
+
+func emailFrom(r *http.Request) string {
+	if v, ok := r.Context().Value(emailKey).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// ---------- SSE hub ----------
+
+type Hub struct {
+	mu      sync.Mutex
+	clients map[chan []byte]struct{}
+}
+
+func NewHub() *Hub { return &Hub{clients: map[chan []byte]struct{}{}} }
+
+func (h *Hub) Add() chan []byte {
+	ch := make(chan []byte, 128)
+	h.mu.Lock()
+	h.clients[ch] = struct{}{}
+	h.mu.Unlock()
+	return ch
+}
+
+func (h *Hub) Remove(ch chan []byte) {
+	h.mu.Lock()
+	delete(h.clients, ch)
+	h.mu.Unlock()
+}
+
+func (h *Hub) Send(b []byte) {
+	h.mu.Lock()
+	for c := range h.clients {
+		select {
+		case c <- b:
+		default: // slow client drops an event; snapshot-on-reconnect heals
+		}
+	}
+	h.mu.Unlock()
+}
+
+// ---------- helpers ----------
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(v); err != nil {
+		log.Printf("webchat: json encode failed: %v", err)
+	}
+}
+
+// sanitizeLog strips control characters so nothing can forge log lines.
+func sanitizeLog(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return -1
+		}
+		return r
+	}, s)
+}
+
+func (s *Server) broadcast(kind string, data any) {
+	b, err := json.Marshal(data)
+	if err != nil {
+		return
+	}
+	s.hub.Send([]byte(fmt.Sprintf("event: %s\ndata: %s\n\n", kind, b)))
+}
+
+func (s *Server) runningState() (bool, string, int) {
+	s.mu.Lock()
+	r, t := s.running, s.runningThread
+	s.mu.Unlock()
+	return r, t, len(s.jobs)
+}
+
+func (s *Server) snapshotPayload() map[string]any {
+	snap := s.store.Snapshot()
+	r, t, q := s.runningState()
+	return map[string]any{
+		"threads":       snap.Threads,
+		"active":        snap.Active,
+		"messages":      snap.Messages,
+		"running":       r,
+		"runningThread": t,
+		"queued":        q,
+	}
+}
+
+// ---------- auth middleware ----------
+
+func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.dev {
+			next(w, r.WithContext(context.WithValue(r.Context(), emailKey, "dev@local")))
+			return
+		}
+		tok := r.Header.Get("Cf-Access-Jwt-Assertion")
+		if tok == "" {
+			if c, err := r.Cookie("CF_Authorization"); err == nil {
+				tok = c.Value
+			}
+		}
+		if tok == "" {
+			tok = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		}
+		if !strings.Contains(tok, ".") {
+			s.deny(w, r)
+			return
+		}
+		email, err := s.auth.Validate(tok)
+		if err != nil {
+			// #nosec G706 — control characters are stripped by sanitizeLog
+			// and %q quotes the result, so no log forging is possible.
+			log.Printf("access denied (%q): %v", sanitizeLog(r.URL.Path), err)
+			s.deny(w, r)
+			return
+		}
+		next(w, r.WithContext(context.WithValue(r.Context(), emailKey, email)))
+	}
+}
+
+func (s *Server) deny(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/") {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write([]byte(`{"error":"unauthorized: sign in via Cloudflare Access first"}`))
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.WriteHeader(http.StatusUnauthorized)
+	fmt.Fprint(w, "<!doctype html><meta charset=utf-8><title>Sentinel</title><p style='font:15px system-ui;padding:40px'>401 — sign in via Cloudflare Access (chat.denhafiz.my) first.</p>")
+}
+
+// ---------- agent worker ----------
+
+func (s *Server) worker() {
+	for job := range s.jobs {
+		s.runJob(job)
+	}
+}
+
+func (s *Server) runJob(job Job) {
+	ctx, cancel := context.WithCancel(context.Background())
+	s.mu.Lock()
+	s.running = true
+	s.runningThread = job.Thread
+	s.cancel = cancel
+	s.mu.Unlock()
+	s.broadcast("status", map[string]any{"running": true, "thread": job.Thread, "queued": len(s.jobs)})
+
+	session := s.store.SessionName(job.Thread)
+	res := runHermes(ctx, session, job.Query, func(delta string) {
+		s.broadcast("delta", map[string]any{"thread": job.Thread, "id": job.MsgID, "text": delta})
+	})
+
+	cancel()
+	s.mu.Lock()
+	s.running = false
+	s.runningThread = ""
+	s.cancel = nil
+	s.mu.Unlock()
+
+	switch {
+	case res.Err != nil:
+		msg := "Agent run failed: " + res.Err.Error()
+		if tail := strings.TrimSpace(res.StderrTail); tail != "" {
+			msg += "\n" + shorten(tail)
+		}
+		log.Printf("webchat job error (thread %s): %v", job.Thread, res.Err)
+		m := s.store.AddError(job.Thread, msg)
+		s.broadcast("msg", map[string]any{"thread": job.Thread, "message": m})
+	case res.Stopped:
+		text := res.Text + "\n\n_[stopped]_"
+		m := s.store.FinalizeAssistant(job.Thread, job.MsgID, text, extractAttachments(text), res.SessionID)
+		s.broadcast("msg", map[string]any{"thread": job.Thread, "message": m})
+	default:
+		m := s.store.FinalizeAssistant(job.Thread, job.MsgID, res.Text, extractAttachments(res.Text), res.SessionID)
+		s.broadcast("msg", map[string]any{"thread": job.Thread, "message": m})
+	}
+	s.broadcast("status", map[string]any{"running": false, "thread": "", "queued": len(s.jobs)})
+}
+
+// ---------- handlers ----------
+
+func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	b, err := webFS.ReadFile("web/index.html")
+	if err != nil {
+		http.Error(w, "missing UI build", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; img-src 'self' blob: data:; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'")
+	_, _ = w.Write(b)
+}
+
+// serveWebAsset serves the embedded PWA files (manifest, service worker, icons).
+func (s *Server) serveWebAsset(w http.ResponseWriter, r *http.Request) {
+	var (
+		b     []byte
+		ctype string
+		err   error
+	)
+	switch strings.TrimPrefix(r.URL.Path, "/") {
+	case "manifest.webmanifest":
+		b, err = webFS.ReadFile("web/manifest.webmanifest")
+		ctype = "application/manifest+json"
+	case "sw.js":
+		b, err = webFS.ReadFile("web/sw.js")
+		ctype = "text/javascript; charset=utf-8"
+	case "icon-192.png":
+		b, err = webFS.ReadFile("web/icon-192.png")
+		ctype = "image/png"
+	case "icon-512.png":
+		b, err = webFS.ReadFile("web/icon-512.png")
+		ctype = "image/png"
+	case "icon-512-maskable.png":
+		b, err = webFS.ReadFile("web/icon-512-maskable.png")
+		ctype = "image/png"
+	case "apple-touch-icon.png":
+		b, err = webFS.ReadFile("web/apple-touch-icon.png")
+		ctype = "image/png"
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Header().Set("Content-Type", ctype)
+	if strings.TrimPrefix(r.URL.Path, "/") == "sw.js" {
+		w.Header().Set("Cache-Control", "no-cache") // SW updates must revalidate
+	} else {
+		w.Header().Set("Cache-Control", "public, max-age=86400")
+	}
+	_, _ = w.Write(b)
+}
+
+func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, s.snapshotPayload())
+}
+
+func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{"email": emailFrom(r), "dev": s.dev})
+}
+
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	fl, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	ch := s.hub.Add()
+	defer s.hub.Remove(ch)
+	if b, err := json.Marshal(s.snapshotPayload()); err == nil {
+		fmt.Fprintf(w, "event: snapshot\ndata: %s\n\n", b)
+		fl.Flush()
+	}
+	tick := time.NewTicker(20 * time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-r.Context().Done():
+			return
+		case <-tick.C:
+			fmt.Fprint(w, ": ping\n\n")
+			fl.Flush()
+		case b := <-ch:
+			_, _ = w.Write(b)
+			fl.Flush()
+		}
+	}
+}
+
+func (s *Server) handleNew(w http.ResponseWriter, r *http.Request) {
+	s.store.NewThread()
+	s.broadcast("snapshot", s.snapshotPayload())
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+func (s *Server) handleActive(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		ID string `json:"id"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil || !s.store.SetActive(req.ID) {
+		http.Error(w, "no such thread", http.StatusBadRequest)
+		return
+	}
+	s.broadcast("snapshot", s.snapshotPayload())
+	writeJSON(w, map[string]any{"ok": true})
+}
+
+// composeQuery shapes the message Hermes receives. Images follow the upstream
+// gateway convention (tui_gateway/session_history.py): reference by absolute
+// path and point the agent at vision_analyze, since one-shot mode has no
+// native image attach. Plain files are listed as paths the agent can open.
+func (s *Server) composeQuery(text string, files []Attachment) string {
+	if len(files) == 0 {
+		return text
+	}
+	var lines []string
+	var plain []Attachment
+	for _, f := range files {
+		if f.Kind == "image" {
+			lines = append(lines,
+				fmt.Sprintf("[The user attached an image: %s]", f.Name),
+				fmt.Sprintf("[Examine it with the vision_analyze tool using image_url: %s]", f.Path))
+		} else {
+			plain = append(plain, f)
+		}
+	}
+	if len(plain) > 0 {
+		lines = append(lines, "Hafiz attached file(s) via webchat (open them from these paths):")
+		for _, f := range plain {
+			lines = append(lines, fmt.Sprintf("- %s (%s)", f.Path, f.Name))
+		}
+	}
+	suffix := strings.Join(lines, "\n")
+	if text != "" {
+		return text + "\n\n" + suffix
+	}
+	return suffix
+}
+
+func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Text  string `json:"text"`
+		Files []struct {
+			Path string `json:"path"`
+			Name string `json:"name"`
+		} `json:"files"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 4<<20)).Decode(&req); err != nil {
+		http.Error(w, "bad request: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	text := strings.TrimSpace(req.Text)
+	var files []Attachment
+	for _, f := range req.Files {
+		// only files that were actually uploaded through this server are
+		// attachable; anything else is ignored.
+		p := filepath.Clean(f.Path)
+		if !strings.HasPrefix(p, s.uploadDir+string(os.PathSeparator)) {
+			continue
+		}
+		fi, err := os.Stat(p)
+		if err != nil || !fi.Mode().IsRegular() {
+			continue
+		}
+		att := Attachment{Path: p, Name: filepath.Base(p), Size: fi.Size(), Kind: kindForFile(p)}
+		if att.Name == "" {
+			att.Name = filepath.Base(p)
+		}
+		files = append(files, att)
+	}
+	if text == "" && len(files) == 0 {
+		http.Error(w, "empty message", http.StatusBadRequest)
+		return
+	}
+	tl, _ := s.store.AddUser(text, files)
+	msgID := s.store.ReserveMsgID()
+	s.broadcast("snapshot", s.snapshotPayload())
+	select {
+	case s.jobs <- Job{Thread: tl.ID, MsgID: msgID, Query: s.composeQuery(text, files)}:
+	default:
+		http.Error(w, "queue full, try again shortly", http.StatusServiceUnavailable)
+		return
+	}
+	writeJSON(w, map[string]any{"ok": true, "thread": tl.ID})
+}
+
+func (s *Server) handleStop(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	c := s.cancel
+	s.mu.Unlock()
+	if c != nil {
+		c()
+		writeJSON(w, map[string]any{"stopped": true})
+		return
+	}
+	writeJSON(w, map[string]any{"stopped": false})
+}
+
+func sanitizeName(name string) string {
+	name = filepath.Base(name)
+	var b strings.Builder
+	for _, r := range name {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9', r == '.', r == '_', r == '-':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('_')
+		}
+	}
+	out := strings.Trim(b.String(), ".")
+	if len(out) > 80 {
+		out = out[len(out)-80:]
+	}
+	if out == "" {
+		out = "file"
+	}
+	return out
+}
+
+func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
+	r.Body = http.MaxBytesReader(w, r.Body, 60<<20)
+	mr, err := r.MultipartReader()
+	if err != nil {
+		http.Error(w, "expected multipart form", http.StatusBadRequest)
+		return
+	}
+	var out []Attachment
+	for {
+		part, err := mr.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if part.FormName() != "file" {
+			continue
+		}
+		name := sanitizeName(part.FileName())
+		dst := filepath.Join(s.uploadDir, fmt.Sprintf("%d_%s", time.Now().UnixNano(), name))
+		// #nosec G304 — dst is uploadDir + a timestamp + sanitizeName(), which
+		// strips everything outside [A-Za-z0-9._-] and trims edge dots, so no
+		// separators or traversal sequences can appear in the file name.
+		f, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY, 0600)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		n, err := io.Copy(f, io.LimitReader(part, 50<<20))
+		_ = f.Close()
+		if err != nil {
+			_ = os.Remove(dst)
+			http.Error(w, "upload failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if n >= 50<<20 {
+			_ = os.Remove(dst)
+			http.Error(w, "file too large (50MB limit)", http.StatusRequestEntityTooLarge)
+			return
+		}
+		out = append(out, Attachment{Path: dst, Name: name, Size: n, Kind: kindForFile(dst)})
+	}
+	writeJSON(w, map[string]any{"files": out})
+}
+
+func serveRootDirs() []string {
+	return []string{homeDir, "/mnt/data", "/tmp"}
+}
+
+func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
+	p := r.URL.Query().Get("path")
+	if p == "" {
+		http.Error(w, "missing path", http.StatusBadRequest)
+		return
+	}
+	if strings.HasPrefix(p, "~/") {
+		p = filepath.Join(homeDir, p[2:])
+	}
+	p = filepath.Clean(p)
+
+	// Serve only from fixed roots. os.Root enforces containment at the
+	// kernel level: neither ".." nor symlinks inside the root can escape it.
+	for _, rootDir := range serveRootDirs() {
+		if !strings.HasPrefix(p, rootDir+string(os.PathSeparator)) {
+			continue
+		}
+		rel := p[len(rootDir)+1:]
+		root, err := os.OpenRoot(rootDir)
+		if err != nil {
+			continue
+		}
+		fi, err := root.Stat(rel)
+		if err != nil || !fi.Mode().IsRegular() {
+			_ = root.Close()
+			continue
+		}
+		if fi.Size() > 500<<20 {
+			_ = root.Close()
+			http.Error(w, "file too large to serve", http.StatusRequestEntityTooLarge)
+			return
+		}
+		f, err := root.Open(rel)
+		if err != nil {
+			_ = root.Close()
+			continue
+		}
+		ct := mime.TypeByExtension(strings.ToLower(filepath.Ext(p)))
+		if ct == "" {
+			buf := make([]byte, 512)
+			n, _ := f.Read(buf)
+			_, _ = f.Seek(0, 0)
+			ct = http.DetectContentType(buf[:n])
+		}
+		disp := "attachment"
+		switch {
+		case strings.HasPrefix(ct, "image/"), strings.HasPrefix(ct, "video/"), strings.HasPrefix(ct, "audio/"), ct == "application/pdf":
+			disp = "inline"
+		}
+		w.Header().Set("Content-Type", ct)
+		w.Header().Set("Content-Disposition", mime.FormatMediaType(disp, map[string]string{"filename": filepath.Base(p)}))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		http.ServeContent(w, r, filepath.Base(p), fi.ModTime(), f)
+		_ = f.Close()
+		_ = root.Close()
+		return
+	}
+	http.Error(w, "not found", http.StatusNotFound)
+}
+
+// ---------- main ----------
+
+func main() {
+	addr := envOr("WEBCCHAT_ADDR", "127.0.0.1") + ":" + envOr("WEBCCHAT_PORT", "9121")
+	dataDir = envOr("WEBCCHAT_DATA", filepath.Join(homeDir, "projects", "hermes-webchat", "data"))
+	team := envOr("CF_ACCESS_TEAM", "crimson-violet-aa50")
+	aud := envOr("CF_AUD", "chat.denhafiz.my")
+	dev := os.Getenv("WEBCCHAT_DEV") == "1"
+
+	uploadDir := filepath.Join(dataDir, "uploads")
+	for _, d := range []string{dataDir, uploadDir} {
+		if err := os.MkdirAll(d, 0700); err != nil {
+			log.Fatal(err)
+		}
+	}
+	store := NewStore(dataDir)
+	if len(store.Snapshot().Threads) == 0 {
+		store.NewThread()
+	}
+
+	srv := &Server{
+		store:     store,
+		hub:       NewHub(),
+		auth:      NewAccessAuth(team, aud),
+		dev:       dev,
+		uploadDir: uploadDir,
+		jobs:      make(chan Job, 16),
+	}
+	go srv.worker()
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok")) })
+	mux.HandleFunc("GET /{$}", srv.authed(srv.handleIndex))
+	mux.HandleFunc("GET /manifest.webmanifest", srv.authed(srv.serveWebAsset))
+	mux.HandleFunc("GET /sw.js", srv.authed(srv.serveWebAsset))
+	mux.HandleFunc("GET /icon-192.png", srv.authed(srv.serveWebAsset))
+	mux.HandleFunc("GET /icon-512.png", srv.authed(srv.serveWebAsset))
+	mux.HandleFunc("GET /icon-512-maskable.png", srv.authed(srv.serveWebAsset))
+	mux.HandleFunc("GET /apple-touch-icon.png", srv.authed(srv.serveWebAsset))
+	mux.HandleFunc("GET /api/state", srv.authed(srv.handleState))
+	mux.HandleFunc("GET /api/me", srv.authed(srv.handleMe))
+	mux.HandleFunc("GET /api/events", srv.authed(srv.handleEvents))
+	mux.HandleFunc("POST /api/new", srv.authed(srv.handleNew))
+	mux.HandleFunc("POST /api/active", srv.authed(srv.handleActive))
+	mux.HandleFunc("POST /api/send", srv.authed(srv.handleSend))
+	mux.HandleFunc("POST /api/stop", srv.authed(srv.handleStop))
+	mux.HandleFunc("POST /api/upload", srv.authed(srv.handleUpload))
+	mux.HandleFunc("GET /api/file", srv.authed(srv.handleFile))
+
+	hs := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	// #nosec G706 — addr/team/aud come from this service's own systemd
+	// Environment= lines, not from requests; they are control-stripped anyway.
+	log.Printf("sentinel listening on http://%s (dev=%v, access team=%s, aud=%s)",
+		sanitizeLog(addr), dev, sanitizeLog(team), sanitizeLog(aud))
+	log.Fatal(hs.ListenAndServe())
+}

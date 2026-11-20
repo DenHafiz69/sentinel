@@ -1,0 +1,342 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<title>Sentinel</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<meta name="theme-color" content="#17181b">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Sentinel">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='46' fill='%232b5278'/%3E%3Ctext x='50' y='66' font-size='52' text-anchor='middle' fill='white' font-family='system-ui'%3ES%3C/text%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#0e0f11; --side:#17181b; --side2:#1d1f23; --bubble-a:#212327; --bubble-u:#2b5278;
+  --txt:#e8eaed; --dim:#8a8f98; --line:#26282d; --accent:#6ab3f3; --err:#c0392b;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--txt);overflow:hidden}
+#app{display:flex;height:100%;max-width:1200px;margin:0 auto}
+/* sidebar */
+#sidebar{width:268px;background:var(--side);display:flex;flex-direction:column;border-right:1px solid var(--line);flex-shrink:0;transition:transform .2s}
+.sidehead{padding:12px 12px 8px}
+#newbtn{width:100%;padding:11px 14px;border:none;border-radius:10px;background:var(--accent);color:#08141f;font-weight:600;font-size:14px;cursor:pointer}
+#newbtn:hover{filter:brightness(1.1)}
+#threads{flex:1;overflow-y:auto;padding:4px 8px}
+.thread{padding:10px 12px;border-radius:10px;cursor:pointer;margin-bottom:2px}
+.thread:hover{background:var(--side2)}
+.thread.active{background:var(--side2)}
+.thread .tt{font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.thread.active .tt{color:white;font-weight:600}
+.thread .ts{font-size:11.5px;color:var(--dim);margin-top:2px}
+#me{padding:12px 14px;border-top:1px solid var(--line);font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* main */
+main{flex:1;display:flex;flex-direction:column;min-width:0}
+header{display:flex;align-items:center;gap:10px;padding:10px 16px;border-bottom:1px solid var(--line);background:var(--bg)}
+#burger{display:none;background:none;border:none;color:var(--txt);font-size:20px;cursor:pointer}
+header h1{font-size:16px;font-weight:600}
+#status{font-size:12px;color:var(--dim)}
+#status.busy{color:var(--accent)}
+#elapsed{font-size:12px;color:var(--dim);margin-left:6px}
+#stopbtn{margin-left:auto;background:var(--side2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer}
+#stopbtn:hover{border-color:var(--err);color:#ff8f7a}
+/* messages */
+#msgs{flex:1;overflow-y:auto;padding:18px 6% 10px;scroll-behavior:smooth}
+.msg{display:flex;margin:3px 0}
+.msg.user{justify-content:flex-end}
+.msg .bubble{max-width:72%;padding:8px 12px;border-radius:14px;background:var(--bubble-a);word-wrap:break-word;overflow-wrap:anywhere}
+.msg.user .bubble{background:var(--bubble-u);border-bottom-right-radius:4px}
+.msg.assistant .bubble{border-bottom-left-radius:4px}
+.msg.error .bubble{background:rgba(192,57,43,.15);border:1px solid rgba(192,57,43,.4)}
+.msg .time{font-size:10.5px;color:rgba(255,255,255,.45);margin-top:3px;text-align:right}
+.bubble .h{font-weight:700;margin:8px 0 3px}
+.bubble .li{margin:2px 0 2px 6px}
+.bubble a{color:var(--accent)}
+.bubble pre{background:#0b0c0e;border:1px solid var(--line);border-radius:8px;padding:9px 11px;overflow-x:auto;margin:7px 0;font-size:13px}
+.bubble code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;background:#0b0c0e;padding:1px 5px;border-radius:5px}
+.bubble pre code{background:none;padding:0}
+.att-img{display:block;max-width:300px;max-height:300px;border-radius:9px;margin:6px 0}
+.att-file{display:flex;align-items:center;gap:9px;background:#0b0c0e;border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin:6px 0;color:var(--txt);text-decoration:none;max-width:320px}
+.att-file:hover{border-color:var(--accent)}
+.att-file .fname{flex:1;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.att-file .fsize{font-size:11px;color:var(--dim)}
+.cursor{display:inline-block;width:8px;height:15px;background:var(--accent);margin-left:2px;vertical-align:-2px;animation:blink 1s steps(1) infinite;border-radius:2px}
+@keyframes blink{50%{opacity:0}}
+#empty{padding:60px 20px;text-align:center;color:var(--dim);font-size:14px;line-height:1.8}
+#empty b{color:var(--txt)}
+/* composer */
+#composer{padding:8px 6% 14px}
+#chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px}
+.chip{display:flex;align-items:center;gap:8px;background:var(--side2);border:1px solid var(--line);border-radius:10px;padding:6px 10px;font-size:13px;max-width:260px}
+.chip img{width:34px;height:34px;object-fit:cover;border-radius:6px}
+.chip .cn{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chip button{background:none;border:none;color:var(--dim);cursor:pointer;font-size:15px}
+.row{display:flex;align-items:flex-end;gap:8px}
+#attach{background:var(--side2);border:1px solid var(--line);border-radius:12px;color:var(--txt);width:42px;height:42px;font-size:17px;cursor:pointer;flex-shrink:0}
+#attach:hover{border-color:var(--accent)}
+#input{flex:1;resize:none;border:1px solid var(--line);background:var(--side2);color:var(--txt);border-radius:12px;padding:11px 14px;font:inherit;max-height:160px;outline:none}
+#input:focus{border-color:#3a3f47}
+#send{background:var(--accent);border:none;border-radius:12px;color:#08141f;width:42px;height:42px;font-size:17px;cursor:pointer;flex-shrink:0}
+#send:hover{filter:brightness(1.1)}
+#toast{position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-70px);background:var(--side2);border:1px solid var(--line);border-radius:10px;padding:10px 18px;font-size:13.5px;transition:transform .25s;z-index:10;max-width:90vw}
+#toast.show{transform:translateX(-50%) translateY(0)}
+@media(max-width:760px){
+  #sidebar{position:fixed;z-index:5;height:100%;transform:translateX(-105%);box-shadow:0 0 40px rgba(0,0,0,.6)}
+  #sidebar.open{transform:translateX(0)}
+  #burger{display:block}
+  .msg .bubble{max-width:86%}
+  #msgs,#composer{padding-left:12px;padding-right:12px}
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="sidehead"><button id="newbtn">+ New chat</button></div>
+    <div id="threads"></div>
+    <div id="me"></div>
+  </aside>
+  <main>
+    <header>
+      <button id="burger">☰</button>
+      <div>
+        <h1>Sentinel</h1>
+        <div><span id="status">connecting…</span><span id="elapsed"></span></div>
+      </div>
+      <button id="stopbtn" hidden>Stop</button>
+    </header>
+    <div id="msgs"></div>
+    <div id="composer">
+      <div id="chips"></div>
+      <div class="row">
+        <button id="attach" title="attach files">📎<input type="file" id="file" multiple hidden></button>
+        <textarea id="input" rows="1" placeholder="Message Sentinel…  /new starts a fresh chat" autocomplete="off"></textarea>
+        <button id="send">➤</button>
+      </div>
+    </div>
+  </main>
+</div>
+<div id="toast"></div>
+<script>
+const $ = s => document.querySelector(s);
+const msgs = $('#msgs');
+let S = {threads:[], active:null, running:false, runningThread:null, queued:0};
+const streamBuf = {};    // msgID -> accumulated delta text
+const streamThread = {}; // msgID -> thread id
+const pending = [];      // uploads waiting to be sent
+let elapsedStart = 0, toastT = null;
+
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+function fmtSize(n){ if(n<1024)return n+' B'; if(n<1048576)return (n/1024).toFixed(1)+' KB'; return (n/1048576).toFixed(1)+' MB'; }
+function ago(ts){ const d=Date.now()/1000-ts; if(d<60)return 'now'; if(d<3600)return Math.floor(d/60)+'m'; if(d<86400)return Math.floor(d/3600)+'h'; return Math.floor(d/86400)+'d'; }
+function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show'); clearTimeout(toastT); toastT=setTimeout(()=>t.classList.remove('show'),3500); }
+function api(path,body){ return fetch(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body||{})}); }
+
+/* mini markdown */
+function renderMD(src){
+  const parts = String(src||'').split(/```/);
+  let out = '';
+  for(let i=0;i<parts.length;i++){
+    if(i%2===1){
+      let code = parts[i].replace(/^[A-Za-z0-9_+\-]*\n/,'');
+      out += '<pre><code>'+esc(code)+'</code></pre>';
+    } else {
+      out += inlineMD(parts[i]);
+    }
+  }
+  return out || '<br>';
+}
+function inlineMD(t){
+  t = esc(t);
+  t = t.replace(/`([^`\n]+)`/g,'<code>$1</code>');
+  t = t.replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>');
+  t = t.replace(/(^|\s)(https?:\/\/[^\s<)]+)/g,'$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+  t = t.replace(/^### (.*)$/gm,'<div class="h">$1</div>');
+  t = t.replace(/^##? (.*)$/gm,'<div class="h">$1</div>');
+  t = t.replace(/^\s*[-*] (.*)$/gm,'<div class="li">• $1</div>');
+  t = t.replace(/\n/g,'<br>');
+  return t;
+}
+
+/* rendering */
+function filesHTML(files){
+  return (files||[]).map(f=>{
+    const url='/api/file?path='+encodeURIComponent(f.path);
+    if(f.kind==='image') return '<a href="'+url+'" target="_blank" rel="noopener"><img class="att-img" loading="lazy" src="'+url+'" alt="'+esc(f.name)+'"></a>';
+    return '<a class="att-file" href="'+url+'" download="'+esc(f.name)+'"><span>📄</span><span class="fname">'+esc(f.name)+'</span><span class="fsize">'+fmtSize(f.size)+'</span></a>';
+  }).join('');
+}
+function bubble(m, streaming){
+  const d=document.createElement('div');
+  d.className='msg '+(m.role==='user'?'user':m.role==='error'?'error':'assistant');
+  d.dataset.id=m.id;
+  const b=document.createElement('div'); b.className='bubble';
+  const fh=filesHTML(m.files); if(fh) b.innerHTML=fh;
+  const t=document.createElement('div'); t.className='txt';
+  if(streaming){ t.innerHTML='<span class="raw"></span><span class="cursor"></span>'; }
+  else if(m.role==='error'){ t.textContent=m.text; }
+  else { t.innerHTML=renderMD(m.text); }
+  b.appendChild(t);
+  const tm=document.createElement('div'); tm.className='time'; tm.textContent=new Date((m.time||0)*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  b.appendChild(tm);
+  d.appendChild(b);
+  return d;
+}
+function nearBottom(){ return msgs.scrollTop+msgs.clientHeight >= msgs.scrollHeight-140; }
+function scrollIfNear(force){ if(force||nearBottom()) msgs.scrollTop=msgs.scrollHeight; }
+function renderEmpty(){
+  let e=$('#empty');
+  const show = msgs.children.length===0;
+  if(show && !e){
+    e=document.createElement('div'); e.id='empty';
+    e.innerHTML='Say hi — <b>Sentinel</b> is your Hermes agent in the browser.<br>'+
+      'Type <b>/new</b> any time to start a fresh chat (Enter ⇧ for newline).<br>'+
+      'Attach files or photos with 📎 — she can send files back too.';
+    msgs.appendChild(e);
+  } else if(!show && e){ e.remove(); }
+}
+function renderThreads(){
+  const el=$('#threads'); el.innerHTML='';
+  for(const t of S.threads){
+    const d=document.createElement('div');
+    d.className='thread'+(t.id===S.active?' active':'');
+    d.innerHTML='<div class="tt">'+esc(t.title)+'</div><div class="ts">'+ago(t.lastTime||t.created)+'</div>';
+    d.onclick=()=>{ api('/api/active',{id:t.id}); if(innerWidth<=760) $('#sidebar').classList.remove('open'); };
+    el.appendChild(d);
+  }
+}
+function ensureStream(id){
+  let el=msgs.querySelector('.msg[data-id="'+id+'"]');
+  if(!el){
+    el=bubble({id,role:'assistant',text:'',files:[],time:Math.floor(Date.now()/1000)},true);
+    msgs.appendChild(el);
+  }
+  return el;
+}
+function renderMessages(list){
+  msgs.innerHTML='';
+  for(const m of list) msgs.appendChild(bubble(m,false));
+  for(const id of Object.keys(streamBuf)){
+    if(streamThread[id]===S.active){
+      const el=ensureStream(id);
+      el.querySelector('.raw').textContent=streamBuf[id];
+    }
+  }
+  renderEmpty();
+  scrollIfNear(true);
+}
+
+/* state events */
+function applySnap(d){
+  const wasRunning=S.running;
+  S.threads=d.threads||[]; S.active=d.active;
+  S.running=!!d.running; S.runningThread=d.runningThread; S.queued=d.queued||0;
+  if(!wasRunning&&S.running) elapsedStart=Date.now();
+  renderThreads();
+  renderMessages(d.messages||[]);
+  updateStatus();
+}
+function onMsg(d){
+  delete streamBuf[d.message.id]; delete streamThread[d.message.id];
+  if(d.thread!==S.active) return;
+  const nb=bubble(d.message,false);
+  const el=msgs.querySelector('.msg[data-id="'+d.message.id+'"]');
+  if(el) el.replaceWith(nb); else msgs.appendChild(nb);
+  renderEmpty();
+  scrollIfNear(true);
+}
+function onDelta(d){
+  streamBuf[d.id]=(streamBuf[d.id]||'')+d.text;
+  streamThread[d.id]=d.thread;
+  if(d.thread!==S.active) return;
+  const el=ensureStream(d.id);
+  el.querySelector('.raw').textContent+=d.text;
+  scrollIfNear();
+}
+function onStatus(d){
+  const wasRunning=S.running;
+  S.running=!!d.running; S.runningThread=d.thread; S.queued=d.queued||0;
+  if(!wasRunning&&S.running) elapsedStart=Date.now();
+  updateStatus();
+}
+function updateStatus(){
+  const st=$('#status'), stop=$('#stopbtn');
+  if(S.running){
+    st.textContent='thinking…'+(S.queued>0?' ('+S.queued+' queued)':'');
+    st.classList.add('busy');
+    stop.hidden=false;
+  } else {
+    st.textContent='online'; st.classList.remove('busy');
+    $('#elapsed').textContent=''; stop.hidden=true;
+  }
+}
+setInterval(()=>{ if(S.running){ $('#elapsed').textContent=Math.floor((Date.now()-elapsedStart)/1000)+'s'; } },1000);
+
+/* SSE */
+function connect(){
+  const es=new EventSource('/api/events');
+  es.addEventListener('snapshot',e=>applySnap(JSON.parse(e.data)));
+  es.addEventListener('msg',    e=>onMsg(JSON.parse(e.data)));
+  es.addEventListener('delta',   e=>onDelta(JSON.parse(e.data)));
+  es.addEventListener('status',  e=>onStatus(JSON.parse(e.data)));
+}
+
+/* composer */
+function autosize(){ const el=$('#input'); el.style.height='auto'; el.style.height=Math.min(el.scrollHeight,160)+'px'; }
+function renderChips(){
+  const c=$('#chips'); c.innerHTML='';
+  pending.forEach((f,i)=>{
+    const d=document.createElement('div'); d.className='chip';
+    d.innerHTML=(f.url?'<img src="'+f.url+'">':'<span>📄</span>')+'<span class="cn">'+esc(f.name)+'</span>';
+    const x=document.createElement('button'); x.textContent='×';
+    x.onclick=()=>{ pending.splice(i,1); renderChips(); };
+    d.appendChild(x); c.appendChild(d);
+  });
+}
+function newChat(){ api('/api/new'); if(innerWidth<=760) $('#sidebar').classList.remove('open'); }
+function send(){
+  const el=$('#input'); const text=el.value.trim();
+  if(text==='/new'){ el.value=''; autosize(); return newChat(); }
+  if(!text && !pending.length) return;
+  const files=pending.map(f=>({path:f.path,name:f.name}));
+  pending.length=0; renderChips();
+  el.value=''; autosize();
+  api('/api/send',{text,files}).then(r=>{ if(!r.ok) r.text().then(t=>toast('send failed: '+t)); })
+    .catch(e=>toast('send failed: '+e));
+}
+$('#send').onclick=send;
+$('#input').addEventListener('keydown',e=>{ if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); } });
+$('#input').addEventListener('input',autosize);
+$('#newbtn').onclick=newChat;
+$('#burger').onclick=()=>$('#sidebar').classList.toggle('open');
+$('#stopbtn').onclick=()=>api('/api/stop');
+$('#attach').onclick=()=>$('#file').click();
+$('#file').addEventListener('change',async e=>{
+  for(const f of e.target.files){
+    const fd=new FormData(); fd.append('file',f);
+    try{
+      const r=await fetch('/api/upload',{method:'POST',body:fd});
+      if(!r.ok) throw new Error(await r.text());
+      const d=await r.json();
+      d.files.forEach(a=>pending.push({...a,url:(a.kind==='image')?URL.createObjectURL(f):null}));
+    }catch(err){ toast('upload failed: '+err); }
+  }
+  e.target.value=''; renderChips();
+});
+
+/* boot */
+fetch('/api/me').then(r=>r.json()).then(d=>{ $('#me').textContent=d.dev?'dev mode':'signed in as '+d.email; }).catch(()=>{});
+fetch('/api/state').then(r=>r.json()).then(applySnap).catch(()=>{});
+connect();
+$('#input').focus();
+if ('serviceWorker' in navigator) {
+  addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(()=>{}));
+}
+</script>
+</body>
+</html>
