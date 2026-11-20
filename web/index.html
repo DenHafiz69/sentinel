@@ -23,7 +23,7 @@ html,body{height:100%;height:100dvh;overscroll-behavior:none;-webkit-text-size-a
 body{font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--txt);overflow:hidden}
 #app{display:flex;width:100%;height:100%;height:100dvh}
 /* sidebar */
-#sidebar{width:296px;background:var(--side);display:flex;flex-direction:column;border-right:1px solid var(--line);flex-shrink:0;transition:transform .22s ease;padding-top:env(safe-area-inset-top);padding-left:env(safe-area-inset-left)}
+#sidebar{width:296px;background:var(--side);display:flex;flex-direction:column;border-right:1px solid var(--line);flex-shrink:0;transition:transform .22s ease;padding-top:env(safe-area-inset-top);padding-left:env(safe-area-inset-left);overscroll-behavior:contain}
 #backdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:4}
 #backdrop.show{display:block}
 .sidehead{padding:12px 12px 8px;display:flex;flex-direction:column;gap:8px}
@@ -191,7 +191,7 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
 .modal-hdr h2{font-size:15px;font-weight:600;flex:1}
 .modal-close{background:none;border:none;color:var(--dim);font-size:18px;cursor:pointer;padding:2px 6px}
 .modal-close:hover{color:var(--txt)}
-.modal-body{padding:12px 14px;max-height:60vh;overflow-y:auto}
+.modal-body{padding:12px 14px;max-height:60vh;overflow-y:auto;overscroll-behavior:contain;overscroll-behavior-y:contain}
 #search-in{width:100%;background:var(--side2);border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px 12px;font:inherit;outline:none}
 #search-in:focus{border-color:var(--accent)}
 #prompt-in,#model-custom{width:100%;background:var(--side2);border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px 12px;font:inherit;outline:none}
@@ -218,36 +218,57 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
   #searchbtn kbd{display:none}
   .msg-acts,.thread-act{opacity:1}
   .thread{min-height:46px}
-  #searchbtn,#sortbtn,#model-pill,#stopbtn,#settings-btn,#ver-badge{min-height:36px}
-  .thread-act{min-width:36px;min-height:36px}
+  /* 44px is the smallest comfortable touch target; secondary chrome may be 32-40 */
+  #newbtn,#searchbtn,#sortbtn,#stopbtn,#settings-btn{min-height:44px}
+  #settings-btn{min-width:44px}
+  #model-pill{min-height:40px}
+  #ver-badge{min-height:32px;display:inline-flex;align-items:center}
+  #burger,#hdr-search,#hdr-settings{min-width:44px;min-height:44px}
+  .thread-act{min-width:44px;min-height:44px}
   .modal-close{min-width:44px;min-height:44px;font-size:20px;display:inline-flex;align-items:center;justify-content:center}
-  .stab{min-height:36px}
-  .srow select{min-height:38px}
-  .btn{padding:9px 16px;min-height:40px}
-  .codebtn{padding:7px 10px;font-size:12px}
-  .msg-act-btn{padding:7px 11px;font-size:12px}
+  .stab{min-height:44px}
+  .arch-hdr{min-height:44px}
+  .srow select{min-height:44px}
+  .btn{padding:9px 16px;min-height:44px}
+  .codebtn{padding:7px 10px;font-size:12px;min-height:32px}
+  .msg-act-btn{padding:7px 11px;font-size:12px;min-height:36px}
+  .chip button{min-width:32px;min-height:32px;font-size:17px}
   #input,#search-in,#prompt-in,#model-custom{font-size:16px}
   main.drop-active::after{display:none}
+  /* a tap that scrolls must not leave a highlighted row behind */
+  .thread:active,.tmenu button:active,.cmd-item:active{background:#2a2d33}
+}
+/* phones held sideways: vertical room is the scarce resource */
+@media (pointer:coarse) and (max-height:520px){
+  header{padding-top:calc(4px + env(safe-area-inset-top));padding-bottom:4px}
+  #elapsed{display:none}
+  #msgs{padding-top:6px}
+  #composer{padding-top:4px;padding-bottom:max(6px,env(safe-area-inset-bottom))}
+  .modal-hdr{padding-top:calc(6px + env(safe-area-inset-top));padding-bottom:6px}
+  #help-modal .modal-hdr,#search-modal .modal-hdr,#settings-modal .modal-hdr,#whatsnew-modal .modal-hdr,#model-modal .modal-hdr{padding-top:calc(6px + env(safe-area-inset-top))}
+  #activity-panel .act-list{max-height:90px}
 }
 @media(max-width:860px){
   #sidebar{position:fixed;z-index:10;height:100%;height:100dvh;width:min(84vw,310px);transform:translateX(-105%);visibility:hidden;box-shadow:0 0 40px rgba(0,0,0,.6)}
   #sidebar.open{transform:translateX(0);visibility:visible}
-  .sidehead{padding:10px 10px 6px}
+  .sidehead{padding:12px 12px 6px}
   #burger,#hdr-search,#hdr-settings{display:inline-flex;align-items:center;justify-content:center}
   header{padding:calc(6px + env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) 6px max(10px,env(safe-area-inset-left));gap:6px}
-  header h1{font-size:15px}
+  header h1{font-size:15px;white-space:nowrap}
   header>div{min-width:0;overflow:hidden}
   header>div>div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   #status{font-size:11.5px}
   #elapsed{margin-left:4px}
   .hdr-right{gap:6px}
-  #model-pill{max-width:88px;padding:6px 8px;font-size:11.5px;min-height:34px}
-  #hdr-search,#hdr-settings{min-width:36px;min-height:36px;padding:6px}
-  #stopbtn{padding:6px 10px;font-size:11.5px;min-height:34px}
+  /* min-heights on these live in the pointer:coarse block; keep only sizing here
+     so a phone gets the 44px targets instead of these desktop-leaning values */
+  #model-pill{max-width:88px;padding:6px 8px;font-size:11.5px}
+  #hdr-search,#hdr-settings{padding:6px}
+  #stopbtn{padding:6px 10px;font-size:11.5px}
   #msgs{padding:10px max(12px,env(safe-area-inset-right)) 6px max(12px,env(safe-area-inset-left))}
   .msg{margin:3px 0}
   .msg .bubble{max-width:92%;padding:8px 11px;border-radius:13px}
-  .msg .time{font-size:10px}
+  .msg .time{font-size:11px}
   .bubble code{font-size:12px}
   .codeblock{margin:6px 0}
   .codehdr{padding:5px 8px}
@@ -294,15 +315,15 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
   </aside>
   <main>
     <header>
-      <button id="burger">☰</button>
+      <button id="burger" aria-label="Open conversations">☰</button>
       <div>
         <h1>Sentinel</h1>
         <div><span id="status">connecting…</span><span id="elapsed"></span></div>
       </div>
       <div class="hdr-right">
         <button id="model-pill" title="Select model (/model)">default</button>
-        <button id="hdr-search" title="Search conversations">🔍</button>
-        <button id="hdr-settings" title="Settings">⚙️</button>
+        <button id="hdr-search" title="Search conversations" aria-label="Search conversations">🔍</button>
+        <button id="hdr-settings" title="Settings" aria-label="Settings">⚙️</button>
         <button id="stopbtn" hidden>Stop</button>
       </div>
     </header>
@@ -312,9 +333,9 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
       <div id="cmd-popup" hidden></div>
       <div id="chips"></div>
       <div class="row">
-        <button id="attach" title="attach files">📎<input type="file" id="file" multiple hidden></button>
-        <textarea id="input" rows="1" placeholder="Message Sentinel… (/ for commands)" autocomplete="off"></textarea>
-        <button id="send">➤</button>
+        <button id="attach" title="attach files" aria-label="Attach files">📎<input type="file" id="file" multiple hidden></button>
+        <textarea id="input" rows="1" placeholder="Message Sentinel… (/ for commands)" autocomplete="off" aria-label="Message Sentinel"></textarea>
+        <button id="send" aria-label="Send message">➤</button>
       </div>
     </div>
   </main>
@@ -649,7 +670,7 @@ function threadRow(t){
   const d=document.createElement('div');
   d.className='thread'+(t.id===S.active?' active':'');
   d.innerHTML='<div class="thread-main"><div class="tt">'+(t.pinned?'<span class="pin-ic">📌</span>':'')+'<span>'+esc(t.title)+'</span></div><div class="ts">'+ago(t.lastTime||t.created)+'</div></div>'+
-    '<button class="thread-act" title="Thread actions">⋯</button>';
+    '<button class="thread-act" title="Thread actions" aria-label="Thread actions">⋯</button>';
   d.onclick=()=>{ api('/api/active',{id:t.id}); if(isNarrow()) setSidebar(false); };
   d.querySelector('.thread-act').onclick=(e)=>{ e.stopPropagation(); showThreadMenu(t, e.currentTarget); };
   return d;
@@ -804,6 +825,7 @@ function connect(){
 function openModal(id){ $('#'+id).hidden = false; }
 function closeModal(id){ $('#'+id).hidden = true; }
 document.querySelectorAll('[data-close]').forEach(b => b.onclick = () => closeModal(b.dataset.close));
+document.querySelectorAll('.modal-close').forEach(b => b.setAttribute('aria-label', 'Close'));
 document.querySelectorAll('.modal-bg').forEach(bg => bg.onclick = (e) => { if(e.target===bg) bg.hidden=true; });
 
 function openRenameModal(t){
