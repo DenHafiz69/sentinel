@@ -358,7 +358,7 @@ func (s *Server) handleUpdate(w http.ResponseWriter, r *http.Request) {
 	}
 	defer updateInFlight.Store(false)
 
-	if busy, thread, _, _, _ := s.runningState(); busy {
+	if busy, thread, _, _, _, _ := s.runningState(); busy {
 		writeJSON(w, updateReport{Message: "Sentinel is mid-reply on " + thread + " — stop it first (/stop)."})
 		return
 	}

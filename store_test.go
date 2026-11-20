@@ -143,7 +143,6 @@ func TestPWAInstallAssets(t *testing.T) {
 	}
 }
 
-<<<<<<< HEAD
 func TestUpdateCommandRegistered(t *testing.T) {
 	found := false
 	for _, c := range commandRegistry {
