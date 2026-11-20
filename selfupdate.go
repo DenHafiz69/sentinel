@@ -199,6 +199,56 @@ func gofmtStep(ctx context.Context, dir string) updateStep {
 	return st
 }
 
+// resolveUpdateRef picks the remote branch /update follows:
+//  1. the current branch's own upstream (set by push -u),
+//  2. origin/<branch> when it exists,
+//  3. the remote's default branch (refs/remotes/origin/HEAD).
+//
+// fallbackFrom is set when step 3 kicked in, i.e. the local branch was never
+// published; callers use it to say which ref they followed and why.
+func resolveUpdateRef(ctx context.Context, dir, branch string) (ref, fallbackFrom string, err error) {
+	commit := func(r string) bool {
+		return gitOut(ctx, dir, "rev-parse", "--verify", "--quiet", r+"^{commit}") != ""
+	}
+	if up := gitOut(ctx, dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", branch+"@{upstream}"); up != "" && commit(up) {
+		return up, "", nil
+	}
+	if candidate := "origin/" + branch; commit(candidate) {
+		return candidate, "", nil
+	}
+	if head := gitOut(ctx, dir, "symbolic-ref", "--short", "-q", "refs/remotes/origin/HEAD"); head != "" && commit(head) {
+		return head, branch, nil
+	}
+	return "", "", fmt.Errorf("cannot tell which remote branch to follow: %q has no upstream, origin/%s does not exist, and origin/HEAD is unset (push the branch or set an upstream)",
+		branch, branch)
+}
+
+// aheadBehind counts local-only and remote-only commits against remoteRef.
+func aheadBehind(ctx context.Context, dir, remoteRef string) (ahead, behind int) {
+	f := strings.Fields(gitOut(ctx, dir, "rev-list", "--left-right", "--count", "HEAD..."+remoteRef))
+	if len(f) != 2 {
+		return 0, 0
+	}
+	ahead, _ = strconv.Atoi(f[0])
+	behind, _ = strconv.Atoi(f[1])
+	return ahead, behind
+}
+
+// upToDateMessage explains a no-op update, including the unpushed case so an
+// "ahead of origin" branch does not look like a failure.
+func upToDateMessage(from, remoteRef string, ahead int, fallbackFrom string) string {
+	var b strings.Builder
+	b.WriteString("Already up to date at " + from)
+	if ahead > 0 {
+		fmt.Fprintf(&b, " — %d local commit(s) ahead of %s, nothing to pull", ahead, remoteRef)
+	}
+	if fallbackFrom != "" {
+		b.WriteString(" (following " + remoteRef + " because " + fallbackFrom + " is not published)")
+	}
+	b.WriteString(".")
+	return b.String()
+}
+
 // selfUpdate does the work and reports what happened. It never leaves a broken
 // binary in place: the new build is written to bin/webchat.new and only renamed
 // over bin/webchat after every gate passed.
@@ -212,11 +262,19 @@ func selfUpdate(ctx context.Context, dir string) updateReport {
 		rep.Message = "Update refused: the checkout is not on a branch (detached HEAD)."
 		return rep
 	}
-	remoteRef := "origin/" + branch
 
 	steps = append(steps, runStep(ctx, dir, "git fetch", gitBin(), "fetch", "--prune", "origin"))
 	if !steps[len(steps)-1].OK {
 		rep.Message = "Update failed: could not fetch origin."
+		return rep
+	}
+
+	// Which remote ref do we follow? A local working branch has no
+	// origin/<branch> at all — that is the /update crash this replaced — so
+	// resolve the upstream, then the published branch, then the remote default.
+	remoteRef, fallbackFrom, rerr := resolveUpdateRef(ctx, dir, branch)
+	if rerr != nil {
+		rep.Message = "Update failed: " + rerr.Error()
 		return rep
 	}
 	head := gitOut(ctx, dir, "rev-parse", "HEAD")
@@ -232,8 +290,19 @@ func selfUpdate(ctx context.Context, dir string) updateReport {
 		return rep
 	}
 
+	ahead, behind := aheadBehind(ctx, dir, remoteRef)
+
 	rebuilt := false
-	if head != remote {
+	if behind == 0 {
+		// Nothing to pull. This is the normal case for an unpushed local
+		// commit, and for a working branch that follows the default branch.
+		if !binaryStale(dir) {
+			rep.OK = true
+			rep.Message = upToDateMessage(rep.From, remoteRef, ahead, fallbackFrom)
+			return rep
+		}
+		rebuilt = true
+	} else {
 		st := runStep(ctx, dir, "git merge --ff-only "+remoteRef, gitBin(), "merge", "--ff-only", remoteRef)
 		steps = append(steps, st)
 		if !st.OK {
@@ -241,13 +310,6 @@ func selfUpdate(ctx context.Context, dir string) updateReport {
 			return rep
 		}
 		rep.Updated = true
-	} else {
-		if !binaryStale(dir) {
-			rep.OK = true
-			rep.Message = "Already up to date at " + rep.From + " — nothing to rebuild."
-			return rep
-		}
-		rebuilt = true
 	}
 
 	checks := []updateStep{gofmtStep(ctx, dir)}
@@ -306,11 +368,14 @@ func selfUpdate(ctx context.Context, dir string) updateReport {
 	}
 
 	rep.OK = true
-	rep.Updated = true
 	rep.Restarted = true
-	if rebuilt {
+	switch {
+	case rebuilt:
 		rep.Message = "Rebuilt " + rep.From + " (gates green). Restarting Sentinel…"
-	} else {
+	case fallbackFrom != "":
+		rep.Message = "Updated " + rep.From + " → " + rep.To + " from " + remoteRef + " (" +
+			fallbackFrom + " is not published; gates green). Restarting Sentinel…"
+	default:
 		rep.Message = "Updated " + rep.From + " → " + rep.To + " (gates green). Restarting Sentinel…"
 	}
 	return rep
