@@ -143,6 +143,7 @@ func TestPWAInstallAssets(t *testing.T) {
 	}
 }
 
+<<<<<<< HEAD
 func TestUpdateCommandRegistered(t *testing.T) {
 	found := false
 	for _, c := range commandRegistry {
@@ -251,5 +252,25 @@ func TestAddNoticeRoles(t *testing.T) {
 	}
 	if msgs[1].Role != "assistant" || msgs[2].Role != "error" {
 		t.Fatalf("unexpected roles %q/%q", msgs[1].Role, msgs[2].Role)
+	}
+}
+
+func TestHandlerChangelog(t *testing.T) {
+	srv := &Server{dev: true}
+	req := httptest.NewRequest(http.MethodGet, "/api/changelog", nil)
+	rec := httptest.NewRecorder()
+	srv.handleChangelog(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("changelog status = %d", rec.Code)
+	}
+	var resp struct {
+		Version   string           `json:"version"`
+		Changelog []ChangelogEntry `json:"changelog"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal changelog: %v", err)
+	}
+	if resp.Version == "" || len(resp.Changelog) == 0 || resp.Changelog[0].Version != resp.Version {
+		t.Fatalf("unexpected changelog payload: %+v", resp)
 	}
 }

@@ -60,6 +60,7 @@ type Server struct {
 	running       bool
 	runningThread string
 	runningMsgID  int64
+	runningText   strings.Builder
 	activities    []Activity
 	cancel        context.CancelFunc
 }
@@ -136,16 +137,16 @@ func (s *Server) broadcast(kind string, data any) {
 	s.hub.Send([]byte(fmt.Sprintf("event: %s\ndata: %s\n\n", kind, b)))
 }
 
-func (s *Server) runningState() (bool, string, int64, []Activity, int) {
+func (s *Server) runningState() (bool, string, int64, string, []Activity, int) {
 	s.mu.Lock()
-	r, t, m, act := s.running, s.runningThread, s.runningMsgID, cloneActivities(s.activities)
+	r, t, m, txt, act := s.running, s.runningThread, s.runningMsgID, s.runningText.String(), cloneActivities(s.activities)
 	s.mu.Unlock()
-	return r, t, m, act, len(s.jobs)
+	return r, t, m, txt, act, len(s.jobs)
 }
 
 func (s *Server) snapshotPayload() map[string]any {
 	snap := s.store.Snapshot()
-	r, t, m, act, q := s.runningState()
+	r, t, m, txt, act, q := s.runningState()
 	return map[string]any{
 		"threads":       snap.Threads,
 		"active":        snap.Active,
@@ -153,6 +154,7 @@ func (s *Server) snapshotPayload() map[string]any {
 		"running":       r,
 		"runningThread": t,
 		"runningMsgId":  m,
+		"runningText":   txt,
 		"activities":    act,
 		"queued":        q,
 	}
@@ -217,6 +219,7 @@ func (s *Server) runJob(job Job) {
 	s.running = true
 	s.runningThread = job.Thread
 	s.runningMsgID = job.MsgID
+	s.runningText.Reset()
 	s.activities = nil
 	s.cancel = cancel
 	s.mu.Unlock()
@@ -224,6 +227,9 @@ func (s *Server) runJob(job Job) {
 
 	session := s.store.SessionName(job.Thread)
 	res := runHermes(ctx, session, job.Query, func(delta string) {
+		s.mu.Lock()
+		s.runningText.WriteString(delta)
+		s.mu.Unlock()
 		s.broadcast("delta", map[string]any{"thread": job.Thread, "id": job.MsgID, "text": delta})
 	}, func(acts []Activity) {
 		s.mu.Lock()
@@ -237,6 +243,7 @@ func (s *Server) runJob(job Job) {
 	s.running = false
 	s.runningThread = ""
 	s.runningMsgID = 0
+	s.runningText.Reset()
 	s.activities = nil
 	s.cancel = nil
 	s.mu.Unlock()
@@ -323,7 +330,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMe(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{"email": emailFrom(r), "dev": s.dev})
+	writeJSON(w, map[string]any{"email": emailFrom(r), "dev": s.dev, "version": Version})
 }
 
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
@@ -711,6 +718,7 @@ func main() {
 	mux.HandleFunc("GET /apple-touch-icon.png", srv.serveWebAsset)
 	mux.HandleFunc("GET /api/state", srv.authed(srv.handleState))
 	mux.HandleFunc("GET /api/me", srv.authed(srv.handleMe))
+	mux.HandleFunc("GET /api/changelog", srv.authed(srv.handleChangelog))
 	mux.HandleFunc("GET /api/commands", srv.authed(srv.handleCommands))
 	mux.HandleFunc("GET /api/search", srv.authed(srv.handleSearch))
 	mux.HandleFunc("GET /api/events", srv.authed(srv.handleEvents))

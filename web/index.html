@@ -52,7 +52,29 @@ body{font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica
 .tmenu button.danger{color:#ff7b6b}
 .arch-hdr{display:flex;align-items:center;justify-content:space-between;padding:8px 10px 4px;font-size:11.5px;color:var(--dim);cursor:pointer;user-select:none}
 .arch-hdr:hover{color:var(--txt)}
-#me{padding:11px 14px max(11px,env(safe-area-inset-bottom));border-top:1px solid var(--line);font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#me{display:flex;align-items:center;gap:8px;padding:10px 12px max(10px,env(safe-area-inset-bottom));border-top:1px solid var(--line);font-size:12px;color:var(--dim)}
+#me-txt{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#ver-badge{font:11px ui-monospace,monospace;background:var(--side2);border:1px solid var(--line);border-radius:6px;padding:2px 6px;color:var(--dim);cursor:pointer;flex-shrink:0}
+#ver-badge:hover{border-color:var(--accent);color:var(--txt)}
+#settings-btn{background:var(--side2);border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:5px 8px;font-size:13px;cursor:pointer;flex-shrink:0}
+#settings-btn:hover{border-color:var(--accent)}
+/* settings & changelog */
+.stabs{display:flex;gap:4px;padding:8px 14px;border-bottom:1px solid var(--line);overflow-x:auto}
+.stab{background:none;border:1px solid transparent;color:var(--dim);padding:6px 10px;border-radius:8px;font-size:12.5px;cursor:pointer;white-space:nowrap}
+.stab:hover{color:var(--txt)}
+.stab.active{background:var(--side2);border-color:var(--line);color:var(--txt);font-weight:600}
+.srow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 0;border-bottom:1px solid var(--line);font-size:13.5px}
+.srow:last-child{border-bottom:none}
+.srow label{display:flex;flex-direction:column;gap:2px}
+.srow .sdesc{font-size:11.5px;color:var(--dim)}
+.srow select{background:var(--side2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:6px 8px;font-size:12.5px}
+.cl-entry{padding:10px 0;border-bottom:1px solid var(--line)}
+.cl-entry:last-child{border-bottom:none}
+.cl-hdr{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.cl-ver{font:12px ui-monospace,monospace;background:rgba(106,179,243,.15);color:var(--accent);padding:2px 7px;border-radius:6px;font-weight:600}
+.cl-date{font-size:11.5px;color:var(--dim);margin-left:auto}
+.cl-title{font-size:13.5px;font-weight:600;margin-bottom:4px}
+.cl-list{padding-left:18px;font-size:13px;color:#c7ccd4;line-height:1.55}
 /* main */
 main{flex:1;display:flex;flex-direction:column;min-width:0;position:relative}
 header{display:flex;align-items:center;gap:10px;padding:calc(10px + env(safe-area-inset-top)) calc(18px + env(safe-area-inset-right)) 10px calc(18px + env(safe-area-inset-left));border-bottom:1px solid var(--line);background:var(--bg)}
@@ -62,7 +84,7 @@ header h1{font-size:16px;font-weight:600}
 #status.busy{color:var(--accent)}
 #elapsed{font-size:12px;color:var(--dim);margin-left:6px}
 .hdr-right{margin-left:auto;display:flex;align-items:center;gap:8px}
-#hdr-search{display:none;background:var(--side2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:14px;cursor:pointer;min-height:36px}
+#hdr-search,#hdr-settings{display:none;background:var(--side2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:14px;cursor:pointer;min-height:36px}
 #stopbtn{background:var(--side2);color:var(--txt);border:1px solid var(--line);border-radius:8px;padding:6px 12px;font-size:12px;cursor:pointer;min-height:34px}
 #stopbtn:hover{border-color:var(--err);color:#ff8f7a}
 /* messages */
@@ -75,6 +97,13 @@ header h1{font-size:16px;font-weight:600}
 .msg.assistant .bubble{border-bottom-left-radius:4px}
 .msg.error .bubble{background:rgba(192,57,43,.15);border:1px solid rgba(192,57,43,.4)}
 .msg .time{font-size:10.5px;color:rgba(255,255,255,.45);margin-top:4px;text-align:right}
+.msg-foot{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-top:4px}
+.msg-acts{display:flex;gap:4px;opacity:0;transition:opacity .15s}
+.msg:hover .msg-acts,.msg:focus-within .msg-acts,.msg.error .msg-acts{opacity:1}
+.msg-act-btn{background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.08);color:var(--dim);border-radius:6px;padding:2px 7px;font-size:11px;cursor:pointer}
+.msg-act-btn:hover{color:var(--txt);border-color:var(--accent)}
+.msg-act-btn.retry{color:#ffb3a7;border-color:rgba(192,57,43,.45)}
+main.drop-active::after{content:"Drop files to attach";position:absolute;inset:12px;border:2px dashed var(--accent);border-radius:14px;background:rgba(14,15,17,.82);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600;color:var(--accent);z-index:25;pointer-events:none}
 .bubble .h{font-weight:700;margin:8px 0 3px}
 .bubble .li{margin:2px 0 2px 6px}
 .bubble a{color:var(--accent)}
@@ -178,12 +207,13 @@ header h1{font-size:16px;font-weight:600}
 @media(max-width:760px){
   #sidebar{position:fixed;z-index:10;height:100%;height:100dvh;width:min(84vw,310px);transform:translateX(-105%);box-shadow:0 0 40px rgba(0,0,0,.6)}
   #sidebar.open{transform:translateX(0)}
-  #burger,#hdr-search{display:inline-flex;align-items:center;justify-content:center}
+  #burger,#hdr-search,#hdr-settings{display:inline-flex;align-items:center;justify-content:center}
   #searchbtn kbd{display:none}
   .msg .bubble{max-width:88%}
   #msgs,#composer{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
   #activity-panel{margin-left:max(12px,env(safe-area-inset-left));margin-right:max(12px,env(safe-area-inset-right))}
   #cmd-popup{left:12px;right:12px}
+  .msg-acts{opacity:1}
   .thread{min-height:44px}
   .thread-act{opacity:1;min-width:34px;min-height:34px}
   #input,#search-in,#prompt-in{font-size:16px}
@@ -204,7 +234,11 @@ header h1{font-size:16px;font-weight:600}
       </div>
     </div>
     <div id="threads"></div>
-    <div id="me"></div>
+    <div id="me">
+      <span id="me-txt"></span>
+      <span id="ver-badge" title="View changelog"></span>
+      <button id="settings-btn" title="Settings">⚙️</button>
+    </div>
   </aside>
   <main>
     <header>
@@ -215,6 +249,7 @@ header h1{font-size:16px;font-weight:600}
       </div>
       <div class="hdr-right">
         <button id="hdr-search" title="Search conversations">🔍</button>
+        <button id="hdr-settings" title="Settings">⚙️</button>
         <button id="stopbtn" hidden>Stop</button>
       </div>
     </header>
@@ -287,15 +322,54 @@ header h1{font-size:16px;font-weight:600}
   </div>
 </div>
 
+<div id="settings-modal" class="modal-bg" hidden>
+  <div class="modal">
+    <div class="modal-hdr">
+      <h2>Settings <span id="settings-ver" class="cl-ver" style="margin-left:6px"></span></h2>
+      <button class="modal-close" data-close="settings-modal">×</button>
+    </div>
+    <div class="stabs" id="stabs">
+      <button class="stab active" data-tab="general">General</button>
+      <button class="stab" data-tab="appearance">Appearance</button>
+      <button class="stab" data-tab="notifications">Notifications</button>
+      <button class="stab" data-tab="changelog">Changelog &amp; About</button>
+    </div>
+    <div class="modal-body" id="settings-body"></div>
+  </div>
+</div>
+
+<div id="whatsnew-modal" class="modal-bg" hidden>
+  <div class="modal">
+    <div class="modal-hdr">
+      <h2 id="wn-title">What's New</h2>
+      <button class="modal-close" data-close="whatsnew-modal">×</button>
+    </div>
+    <div class="modal-body">
+      <div id="wn-body"></div>
+      <div class="confirm-btns">
+        <button class="btn" id="wn-full">Full changelog</button>
+        <button class="btn primary" id="wn-ok">Got it</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 <script>
 const $ = s => document.querySelector(s);
 const msgs = $('#msgs');
 let S = {threads:[], active:null, running:false, runningThread:null, runningMsgId:0, activities:[], queued:0};
 let commands = [];
+let appVersion = '';
+let changelogData = [];
+let meInfo = {};
 let sortBy = localStorage.getItem('sentinel_sort') || 'recent';
+let enterToSend = localStorage.getItem('sentinel_enter_send') !== '0';
+let fontSize = localStorage.getItem('sentinel_font_size') || '15';
+let actExpanded = localStorage.getItem('sentinel_act_expanded') === '1';
+let notifyBg = localStorage.getItem('sentinel_notify') === '1';
+let settingsTab = 'general';
 let showArchived = false;
-let actExpanded = false;
 let cmdIdx = 0;
 let cmdFiltered = [];
 let pendingJumpMsg = null;
@@ -303,6 +377,9 @@ const streamBuf = {};    // msgID -> accumulated delta text
 const streamThread = {}; // msgID -> thread id
 const pending = [];      // uploads waiting to be sent
 let elapsedStart = 0, toastT = null, searchT = null;
+let sseState = 'connecting';
+let currentMsgs = [];
+const msgStore = {};
 
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 function fmtSize(n){ if(n<1024)return n+' B'; if(n<1048576)return (n/1024).toFixed(1)+' KB'; return (n/1048576).toFixed(1)+' MB'; }
@@ -420,8 +497,23 @@ function bubble(m, streaming){
     det.innerHTML = '<summary>Activity ('+m.activities.length+' step'+(m.activities.length>1?'s':'')+')</summary><div class="act-list">'+activitiesListHTML(m.activities)+'</div>';
     b.appendChild(det);
   }
-  const tm=document.createElement('div'); tm.className='time'; tm.textContent=new Date((m.time||0)*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
-  b.appendChild(tm);
+  const foot=document.createElement('div'); foot.className='msg-foot';
+  if(!streaming){
+    msgStore[m.id] = m;
+    const acts=document.createElement('div'); acts.className='msg-acts';
+    if(m.text){
+      const cp=document.createElement('button'); cp.className='msg-act-btn'; cp.textContent='Copy'; cp.dataset.msgCopy=m.id;
+      acts.appendChild(cp);
+    }
+    if(m.role==='error'){
+      const rt=document.createElement('button'); rt.className='msg-act-btn retry'; rt.textContent='Retry'; rt.dataset.msgRetry=m.id;
+      acts.appendChild(rt);
+    }
+    foot.appendChild(acts);
+  }
+  const tm=document.createElement('div'); tm.className='time'; tm.style.marginTop='0'; tm.textContent=new Date((m.time||0)*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'});
+  foot.appendChild(tm);
+  b.appendChild(foot);
   d.appendChild(b);
   return d;
 }
@@ -507,8 +599,9 @@ function ensureStream(id){
   return el;
 }
 function renderMessages(list){
+  currentMsgs = list || [];
   msgs.innerHTML='';
-  for(const m of list) msgs.appendChild(bubble(m,false));
+  for(const m of currentMsgs) msgs.appendChild(bubble(m,false));
   for(const id of Object.keys(streamBuf)){
     if(streamThread[id]===S.active){
       const el=ensureStream(id);
@@ -535,6 +628,12 @@ function applySnap(d){
   S.threads=d.threads||[]; S.active=d.active;
   S.running=!!d.running; S.runningThread=d.runningThread; S.runningMsgId=d.runningMsgId||0;
   S.activities=d.activities||[]; S.queued=d.queued||0;
+  if(S.running && S.runningMsgId && S.runningThread){
+    streamThread[S.runningMsgId] = S.runningThread;
+    if(d.runningText && (!streamBuf[S.runningMsgId] || d.runningText.length > streamBuf[S.runningMsgId].length)){
+      streamBuf[S.runningMsgId] = d.runningText;
+    }
+  }
   if(!wasRunning&&S.running) elapsedStart=Date.now();
   renderThreads();
   renderMessages(d.messages||[]);
@@ -543,7 +642,11 @@ function applySnap(d){
 }
 function onMsg(d){
   delete streamBuf[d.message.id]; delete streamThread[d.message.id];
+  if(notifyBg && document.hidden && d.message.role!=='user' && 'Notification' in window && Notification.permission==='granted'){
+    try{ new Notification(d.message.role==='error'?'Sentinel Error':'Sentinel Reply', {body:(d.message.text||'').slice(0,120)}); }catch(_){}
+  }
   if(d.thread!==S.active) return;
+  currentMsgs.push(d.message);
   const nb=bubble(d.message,false);
   const el=msgs.querySelector('.msg[data-id="'+d.message.id+'"]');
   if(el) el.replaceWith(nb); else msgs.appendChild(nb);
@@ -571,6 +674,19 @@ function onStatus(d){
 }
 function updateStatus(){
   const st=$('#status'), stop=$('#stopbtn');
+  if(sseState==='expired'){
+    st.textContent='session expired — reload to sign in';
+    st.classList.remove('busy');
+    $('#elapsed').textContent='';
+    stop.hidden=true;
+    return;
+  }
+  if(sseState==='reconnecting'){
+    st.textContent='reconnecting…';
+    st.classList.add('busy');
+    stop.hidden=!S.running;
+    return;
+  }
   if(S.running){
     st.textContent='thinking…'+(S.queued>0?' ('+S.queued+' queued)':'');
     st.classList.add('busy');
@@ -590,6 +706,11 @@ setInterval(()=>{
 /* SSE */
 function connect(){
   const es=new EventSource('/api/events');
+  es.onopen=()=>{ sseState='online'; updateStatus(); };
+  es.onerror=()=>{
+    sseState='reconnecting'; updateStatus();
+    fetch('/api/me').then(r=>{ if(r.status===401){ sseState='expired'; updateStatus(); toast('Session expired — reload to sign in'); es.close(); } }).catch(()=>{});
+  };
   es.addEventListener('snapshot',e=>applySnap(JSON.parse(e.data)));
   es.addEventListener('msg',     e=>onMsg(JSON.parse(e.data)));
   es.addEventListener('delta',   e=>onDelta(JSON.parse(e.data)));
@@ -631,6 +752,84 @@ function openHelpModal(){
   ).join('');
   openModal('help-modal');
 }
+
+/* settings & changelog */
+function applyPrefs(){
+  document.body.style.fontSize = fontSize + 'px';
+}
+function renderChangelogEntries(list){
+  return (list||[]).map(e =>
+    '<div class="cl-entry">'+
+      '<div class="cl-hdr"><span class="cl-ver">v'+esc(e.version)+'</span><span class="cl-date">'+esc(e.date)+'</span></div>'+
+      '<div class="cl-title">'+esc(e.title)+'</div>'+
+      '<ul class="cl-list">'+(e.items||[]).map(i=>'<li>'+esc(i)+'</li>').join('')+'</ul>'+
+    '</div>'
+  ).join('');
+}
+function renderSettingsTab(){
+  const body = $('#settings-body');
+  document.querySelectorAll('#stabs .stab').forEach(b => b.classList.toggle('active', b.dataset.tab===settingsTab));
+  if(settingsTab === 'general'){
+    body.innerHTML =
+      '<div class="srow"><label>Thread sort order<span class="sdesc">Default sidebar ordering</span></label>'+
+        '<select id="set-sort"><option value="recent"'+(sortBy==='recent'?' selected':'')+'>Recent activity</option><option value="created"'+(sortBy==='created'?' selected':'')+'>Creation date</option></select></div>'+
+      '<div class="srow"><label>Send key<span class="sdesc">How Enter behaves in the composer</span></label>'+
+        '<select id="set-enter"><option value="1"'+(enterToSend?' selected':'')+'>Enter to send</option><option value="0"'+(!enterToSend?' selected':'')+'>Ctrl/Cmd+Enter to send</option></select></div>';
+    $('#set-sort').onchange = e => { sortBy=e.target.value; localStorage.setItem('sentinel_sort',sortBy); renderThreads(); };
+    $('#set-enter').onchange = e => { enterToSend=e.target.value==='1'; localStorage.setItem('sentinel_enter_send',e.target.value); };
+  } else if(settingsTab === 'appearance'){
+    body.innerHTML =
+      '<div class="srow"><label>Chat font size<span class="sdesc">Base text size across messages</span></label>'+
+        '<select id="set-font"><option value="14"'+(fontSize==='14'?' selected':'')+'>Compact (14px)</option><option value="15"'+(fontSize==='15'?' selected':'')+'>Default (15px)</option><option value="16"'+(fontSize==='16'?' selected':'')+'>Large (16px)</option></select></div>'+
+      '<div class="srow"><label>Expand activity panel<span class="sdesc">Show tool details automatically while running</span></label>'+
+        '<input type="checkbox" id="set-act"'+(actExpanded?' checked':'')+'></div>';
+    $('#set-font').onchange = e => { fontSize=e.target.value; localStorage.setItem('sentinel_font_size',fontSize); applyPrefs(); };
+    $('#set-act').onchange = e => { actExpanded=e.target.checked; localStorage.setItem('sentinel_act_expanded',actExpanded?'1':'0'); renderActivityPanel(); };
+  } else if(settingsTab === 'notifications'){
+    body.innerHTML =
+      '<div class="srow"><label>Background reply alerts<span class="sdesc">Browser notification when a reply finishes while tab is hidden</span></label>'+
+        '<input type="checkbox" id="set-notify"'+(notifyBg?' checked':'')+'></div>';
+    $('#set-notify').onchange = async e => {
+      if(e.target.checked && 'Notification' in window && Notification.permission !== 'granted'){
+        const p = await Notification.requestPermission();
+        if(p !== 'granted'){ e.target.checked=false; toast('Notification permission denied'); return; }
+      }
+      notifyBg = e.target.checked;
+      localStorage.setItem('sentinel_notify', notifyBg?'1':'0');
+    };
+  } else {
+    const who = meInfo.dev ? 'dev mode' : (meInfo.email ? 'Signed in as '+meInfo.email : 'Unknown');
+    body.innerHTML =
+      '<div class="srow"><label>Sentinel<span class="sdesc">'+esc(who)+'</span></label><span class="cl-ver">v'+esc(appVersion||'?')+'</span></div>'+
+      '<div style="margin-top:8px;font-size:12px;color:var(--dim);font-weight:600;text-transform:uppercase;letter-spacing:.04em">Full Changelog</div>'+
+      renderChangelogEntries(changelogData);
+  }
+}
+function openSettingsModal(tab){
+  if(tab) settingsTab = tab;
+  $('#settings-ver').textContent = appVersion ? 'v'+appVersion : '';
+  renderSettingsTab();
+  openModal('settings-modal');
+}
+$('#stabs').onclick = e => {
+  const b = e.target.closest('.stab');
+  if(b){ settingsTab = b.dataset.tab; renderSettingsTab(); }
+};
+function markChangelogSeen(){
+  if(appVersion) localStorage.setItem('sentinel_seen_version', appVersion);
+}
+function maybeShowWhatsNew(){
+  if(!appVersion || !changelogData.length) return;
+  const seen = localStorage.getItem('sentinel_seen_version');
+  if(seen === appVersion) return;
+  const latest = changelogData[0];
+  $('#wn-title').textContent = "What's New in Sentinel v" + appVersion;
+  $('#wn-body').innerHTML = renderChangelogEntries([latest]);
+  openModal('whatsnew-modal');
+}
+$('#wn-ok').onclick = () => { markChangelogSeen(); closeModal('whatsnew-modal'); };
+$('#wn-full').onclick = () => { markChangelogSeen(); closeModal('whatsnew-modal'); openSettingsModal('changelog'); };
+$('#whatsnew-modal .modal-close').onclick = () => { markChangelogSeen(); closeModal('whatsnew-modal'); };
 
 /* search */
 function highlightTerm(text, q){
@@ -733,6 +932,7 @@ function execSlashCommand(cmd, arg){
     case '/archive': api('/api/thread/archive', {id:S.active, archived:true}); return true;
     case '/stop': api('/api/stop'); return true;
     case '/update': runUpdate(); return true;
+    case '/settings': openSettingsModal('general'); return true;
   }
   return false;
 }
@@ -806,7 +1006,8 @@ $('#input').addEventListener('keydown',e=>{
     if(e.key==='Tab' || (e.key==='Enter' && !e.shiftKey)){ e.preventDefault(); selectCommand(cmdFiltered[cmdIdx]); return; }
     if(e.key==='Escape'){ e.preventDefault(); pop.hidden=true; return; }
   }
-  if(e.key==='Enter'&&!e.shiftKey){ e.preventDefault(); send(); }
+  const sendCombo = enterToSend ? (e.key==='Enter' && !e.shiftKey) : (e.key==='Enter' && (e.ctrlKey||e.metaKey));
+  if(sendCombo){ e.preventDefault(); send(); }
 });
 $('#input').addEventListener('input',()=>{ autosize(); cmdIdx=0; updateCmdPopup(); });
 $('#newbtn').onclick=newChat;
@@ -819,10 +1020,14 @@ $('#sortbtn').onclick=()=>{
 $('#burger').onclick=()=>setSidebar(!$('#sidebar').classList.contains('open'));
 $('#backdrop').onclick=()=>setSidebar(false);
 $('#hdr-search').onclick=()=>openSearchModal('');
+$('#hdr-settings').onclick=()=>openSettingsModal('general');
+$('#settings-btn').onclick=()=>openSettingsModal('general');
+$('#ver-badge').onclick=()=>openSettingsModal('changelog');
 $('#stopbtn').onclick=()=>api('/api/stop');
 $('#attach').onclick=()=>$('#file').click();
-$('#file').addEventListener('change',async e=>{
-  for(const f of e.target.files){
+async function uploadFiles(fileList){
+  if(!fileList || !fileList.length) return;
+  for(const f of fileList){
     const fd=new FormData(); fd.append('file',f);
     try{
       const r=await fetch('/api/upload',{method:'POST',body:fd});
@@ -831,10 +1036,61 @@ $('#file').addEventListener('change',async e=>{
       d.files.forEach(a=>pending.push({...a,url:(a.kind==='image')?URL.createObjectURL(f):null}));
     }catch(err){ toast('upload failed: '+err); }
   }
-  e.target.value=''; renderChips();
+  renderChips();
+}
+$('#file').addEventListener('change',async e=>{
+  await uploadFiles(e.target.files);
+  e.target.value='';
+});
+$('#input').addEventListener('paste', e=>{
+  const files = e.clipboardData && e.clipboardData.files;
+  if(files && files.length){ e.preventDefault(); uploadFiles(files); }
+});
+const mainEl = document.querySelector('main');
+let dragDepth = 0;
+mainEl.addEventListener('dragenter', e=>{
+  if(e.dataTransfer && Array.from(e.dataTransfer.types||[]).includes('Files')){
+    e.preventDefault(); dragDepth++; mainEl.classList.add('drop-active');
+  }
+});
+mainEl.addEventListener('dragover', e=>{
+  if(e.dataTransfer && Array.from(e.dataTransfer.types||[]).includes('Files')) e.preventDefault();
+});
+mainEl.addEventListener('dragleave', ()=>{
+  dragDepth = Math.max(0, dragDepth-1);
+  if(dragDepth===0) mainEl.classList.remove('drop-active');
+});
+mainEl.addEventListener('drop', e=>{
+  dragDepth = 0; mainEl.classList.remove('drop-active');
+  const files = e.dataTransfer && e.dataTransfer.files;
+  if(files && files.length){ e.preventDefault(); uploadFiles(files); }
 });
 
 msgs.addEventListener('click', e => {
+  const mcp = e.target.closest('[data-msg-copy]');
+  if(mcp){
+    const m = msgStore[mcp.dataset.msgCopy];
+    if(m && m.text && navigator.clipboard){
+      navigator.clipboard.writeText(m.text).then(()=>{
+        mcp.textContent='Copied'; setTimeout(()=>mcp.textContent='Copy',1500);
+      });
+    }
+    return;
+  }
+  const mrt = e.target.closest('[data-msg-retry]');
+  if(mrt){
+    const errId = Number(mrt.dataset.msgRetry);
+    const idx = currentMsgs.findIndex(x=>x.id===errId);
+    let prevUser = null;
+    for(let i=(idx<0?currentMsgs.length-1:idx-1); i>=0; i--){
+      if(currentMsgs[i].role==='user'){ prevUser = currentMsgs[i]; break; }
+    }
+    if(!prevUser){ toast('Nothing to retry'); return; }
+    const files = (prevUser.files||[]).map(f=>({path:f.path,name:f.name}));
+    api('/api/send',{text:prevUser.text, files}).then(r=>{ if(!r.ok) r.text().then(t=>toast('retry failed: '+t)); })
+      .catch(err=>toast('retry failed: '+err));
+    return;
+  }
   const cp = e.target.closest('[data-copy]');
   if(cp){
     const item = codeStore[cp.dataset.copy];
@@ -868,13 +1124,24 @@ window.addEventListener('keydown', e => {
   } else if(e.key==='Escape'){
     closeThreadMenu();
     setSidebar(false);
-    ['search-modal','help-modal','prompt-modal','confirm-modal'].forEach(closeModal);
+    if(!$('#whatsnew-modal').hidden) markChangelogSeen();
+    ['search-modal','help-modal','prompt-modal','confirm-modal','settings-modal','whatsnew-modal'].forEach(closeModal);
     $('#cmd-popup').hidden = true;
   }
 });
 
 /* boot */
-fetch('/api/me').then(r=>r.json()).then(d=>{ $('#me').textContent=d.dev?'dev mode':'signed in as '+d.email; }).catch(()=>{});
+applyPrefs();
+fetch('/api/me').then(r=>r.json()).then(d=>{
+  meInfo = d;
+  $('#me-txt').textContent = d.dev ? 'dev mode' : 'signed in as '+d.email;
+  if(d.version){ appVersion = d.version; $('#ver-badge').textContent = 'v'+d.version; }
+}).catch(()=>{});
+fetch('/api/changelog').then(r=>r.json()).then(d=>{
+  if(d.version){ appVersion = d.version; $('#ver-badge').textContent = 'v'+d.version; }
+  changelogData = d.changelog || [];
+  maybeShowWhatsNew();
+}).catch(()=>{});
 fetch('/api/commands').then(r=>r.json()).then(d=>{ commands=d.commands||[]; }).catch(()=>{});
 fetch('/api/state').then(r=>r.json()).then(applySnap).catch(()=>{});
 connect();
