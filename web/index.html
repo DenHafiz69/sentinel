@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
 <meta name="color-scheme" content="dark">
 <title>Sentinel</title>
 <link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
@@ -19,7 +19,7 @@
   --txt:#e8eaed; --dim:#8a8f98; --line:#26282d; --accent:#6ab3f3; --err:#c0392b; --ok:#2ecc71;
 }
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;height:100dvh;overscroll-behavior:none}
+html,body{height:100%;height:100dvh;overscroll-behavior:none;-webkit-text-size-adjust:100%;text-size-adjust:100%}
 body{font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;background:var(--bg);color:var(--txt);overflow:hidden}
 #app{display:flex;width:100%;height:100%;height:100dvh}
 /* sidebar */
@@ -194,6 +194,9 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
 .modal-body{padding:12px 14px;max-height:60vh;overflow-y:auto}
 #search-in{width:100%;background:var(--side2);border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px 12px;font:inherit;outline:none}
 #search-in:focus{border-color:var(--accent)}
+#prompt-in,#model-custom{width:100%;background:var(--side2);border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px 12px;font:inherit;outline:none}
+#model-custom{flex:1;width:auto;min-width:0;border-radius:8px;padding:8px 10px}
+#prompt-in:focus,#model-custom:focus{border-color:var(--accent)}
 #search-res{margin-top:10px;display:flex;flex-direction:column;gap:4px}
 .shit{padding:9px 11px;border-radius:9px;cursor:pointer;border:1px solid transparent}
 .shit:hover{background:var(--side2);border-color:var(--line)}
@@ -209,21 +212,65 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
 .btn.danger{background:var(--err);border-color:var(--err);color:#fff;font-weight:600}
 #toast{position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-70px);background:var(--side2);border:1px solid var(--line);border-radius:10px;padding:10px 18px;font-size:13.5px;transition:transform .25s;z-index:50;max-width:90vw}
 #toast.show{transform:translateX(-50%) translateY(0)}
-@media(max-width:760px){
-  #sidebar{position:fixed;z-index:10;height:100%;height:100dvh;width:min(84vw,310px);transform:translateX(-105%);box-shadow:0 0 40px rgba(0,0,0,.6)}
-  #sidebar.open{transform:translateX(0)}
-  #burger,#hdr-search,#hdr-settings{display:inline-flex;align-items:center;justify-content:center}
+/* touch devices: no hover, no hardware keyboard, no drag-and-drop */
+@media (pointer:coarse){
+  #app{height:var(--app-h,100dvh)}
   #searchbtn kbd{display:none}
-  .msg .bubble{max-width:88%}
-  #msgs,#composer{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
-  #activity-panel{margin-left:max(12px,env(safe-area-inset-left));margin-right:max(12px,env(safe-area-inset-right))}
-  #cmd-popup{left:12px;right:12px}
-  .msg-acts{opacity:1}
-  .thread{min-height:44px}
-  .thread-act{opacity:1;min-width:34px;min-height:34px}
-  #input,#search-in,#prompt-in{font-size:16px}
+  .msg-acts,.thread-act{opacity:1}
+  .thread{min-height:46px}
+  #searchbtn,#sortbtn,#model-pill,#stopbtn,#settings-btn,#ver-badge{min-height:36px}
+  .thread-act{min-width:36px;min-height:36px}
+  .modal-close{min-width:44px;min-height:44px;font-size:20px;display:inline-flex;align-items:center;justify-content:center}
+  .stab{min-height:36px}
+  .srow select{min-height:38px}
+  .btn{padding:9px 16px;min-height:40px}
+  .codebtn{padding:7px 10px;font-size:12px}
+  .msg-act-btn{padding:7px 11px;font-size:12px}
+  #input,#search-in,#prompt-in,#model-custom{font-size:16px}
+  main.drop-active::after{display:none}
+}
+@media(max-width:860px){
+  #sidebar{position:fixed;z-index:10;height:100%;height:100dvh;width:min(84vw,310px);transform:translateX(-105%);visibility:hidden;box-shadow:0 0 40px rgba(0,0,0,.6)}
+  #sidebar.open{transform:translateX(0);visibility:visible}
+  .sidehead{padding:10px 10px 6px}
+  #burger,#hdr-search,#hdr-settings{display:inline-flex;align-items:center;justify-content:center}
+  header{padding:calc(6px + env(safe-area-inset-top)) max(10px,env(safe-area-inset-right)) 6px max(10px,env(safe-area-inset-left));gap:6px}
+  header h1{font-size:15px}
+  header>div{min-width:0;overflow:hidden}
+  header>div>div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  #status{font-size:11.5px}
+  #elapsed{margin-left:4px}
+  .hdr-right{gap:6px}
+  #model-pill{max-width:88px;padding:6px 8px;font-size:11.5px;min-height:34px}
+  #hdr-search,#hdr-settings{min-width:36px;min-height:36px;padding:6px}
+  #stopbtn{padding:6px 10px;font-size:11.5px;min-height:34px}
+  #msgs{padding:10px max(12px,env(safe-area-inset-right)) 6px max(12px,env(safe-area-inset-left))}
+  .msg{margin:3px 0}
+  .msg .bubble{max-width:92%;padding:8px 11px;border-radius:13px}
+  .msg .time{font-size:10px}
+  .bubble code{font-size:12px}
+  .codeblock{margin:6px 0}
+  .codehdr{padding:5px 8px}
+  .codebody{font-size:11.5px}
+  .codeln{display:none}
+  .codebody pre{padding:8px 10px}
+  .att-img{max-width:100%;max-height:240px}
+  .att-file{max-width:100%}
+  #empty{padding:40px 14px;font-size:13.5px;line-height:1.7}
+  #activity-panel{margin-left:max(12px,env(safe-area-inset-left));margin-right:max(12px,env(safe-area-inset-right));margin-bottom:4px}
+  .act-list{max-height:120px}
+  #composer{padding:6px max(12px,env(safe-area-inset-right)) max(8px,env(safe-area-inset-bottom)) max(12px,env(safe-area-inset-left))}
+  #cmd-popup{left:max(12px,env(safe-area-inset-left));right:max(12px,env(safe-area-inset-right));max-height:min(45dvh,260px)}
+  .cmd-item{padding:9px 10px}
+  .chip{max-width:100%}
   #attach,#send{width:44px;height:44px}
-  .modal-bg{padding:max(16px,env(safe-area-inset-top)) 12px max(16px,env(safe-area-inset-bottom))}
+  #toast{top:calc(10px + env(safe-area-inset-top));font-size:13px;padding:9px 14px}
+  /* long modals become full-screen sheets */
+  #help-modal,#search-modal,#settings-modal,#whatsnew-modal,#model-modal{padding:0;align-items:stretch}
+  #help-modal .modal,#search-modal .modal,#settings-modal .modal,#whatsnew-modal .modal,#model-modal .modal{max-width:none;height:100%;max-height:100dvh;border-radius:0;display:flex;flex-direction:column}
+  #help-modal .modal-hdr,#search-modal .modal-hdr,#settings-modal .modal-hdr,#whatsnew-modal .modal-hdr,#model-modal .modal-hdr{padding-top:calc(10px + env(safe-area-inset-top))}
+  #help-modal .modal-body,#search-modal .modal-body,#settings-modal .modal-body,#whatsnew-modal .modal-body,#model-modal .modal-body{flex:1;min-height:0;max-height:none;padding-bottom:max(14px,env(safe-area-inset-bottom))}
+  #prompt-modal,#confirm-modal{padding:max(12px,env(safe-area-inset-top)) 12px max(12px,env(safe-area-inset-bottom))}
 }
 </style>
 </head>
@@ -303,7 +350,7 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
       <button class="modal-close" data-close="prompt-modal">×</button>
     </div>
     <div class="modal-body">
-      <input id="prompt-in" type="text" style="width:100%;background:var(--side2);border:1px solid var(--line);border-radius:10px;color:var(--txt);padding:10px 12px;font:inherit;outline:none">
+      <input id="prompt-in" type="text" autocomplete="off">
       <div class="confirm-btns">
         <button class="btn" data-close="prompt-modal">Cancel</button>
         <button class="btn primary" id="prompt-ok">Save</button>
@@ -369,7 +416,7 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
     <div class="modal-body">
       <div id="model-list"></div>
       <div style="display:flex;gap:8px;margin-top:8px">
-        <input id="model-custom" type="text" placeholder="Custom model ID (e.g. claude-sonnet-4-5)" style="flex:1;background:var(--side2);border:1px solid var(--line);border-radius:8px;color:var(--txt);padding:8px 10px;font:inherit;outline:none">
+        <input id="model-custom" type="text" placeholder="Custom model ID (e.g. claude-sonnet-4-5)" autocomplete="off">
         <button class="btn primary" id="model-apply">Apply</button>
       </div>
     </div>
@@ -379,6 +426,9 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
 <div id="toast"></div>
 <script>
 const $ = s => document.querySelector(s);
+const isTouch = matchMedia('(hover:none) and (pointer:coarse)').matches;
+const hasKeyboard = !isTouch || matchMedia('(any-pointer:fine)').matches; // phones report no fine pointer; touch laptops still do
+const isNarrow = () => innerWidth <= 860;
 const msgs = $('#msgs');
 let S = {threads:[], active:null, running:false, runningThread:null, runningMsgId:0, activities:[], queued:0};
 let commands = [];
@@ -415,15 +465,21 @@ const LANG_EXT = {go:'go',python:'py',py:'py',javascript:'js',js:'js',typescript
 const KW_RE = /\b(func|return|if|else|for|range|switch|case|default|break|continue|struct|interface|type|package|import|var|const|defer|go|select|chan|map|def|class|async|await|try|except|finally|with|as|from|import|lambda|yield|let|function|export|true|false|null|nil|None|True|False|SELECT|FROM|WHERE|INSERT|UPDATE|DELETE|JOIN|CREATE|TABLE)\b/g;
 
 function highlightCode(raw){
-  // Escape first, then highlight comments, strings, numbers, and keywords safely.
+  // Escape first, stash comments/strings/numbers behind placeholders that contain
+  // no word characters (tokens were digits, so highlighting then re-scanned its own
+  // span attributes and produced broken markup), then highlight keywords on the rest.
   const tokens = [];
-  const stash = (html) => { tokens.push(html); return '\x00'+(tokens.length-1)+'\x00'; };
+  const stash = (content, cls) => {   // private-use placeholders hold up to 6143 tokens
+    if(tokens.length >= 6143) return content;
+    tokens.push('<span class="' + cls + '">' + content + '</span>');
+    return '\uE000' + String.fromCharCode(0xE100 + tokens.length - 1) + '\uE001';
+  };
   let s = esc(raw);
-  s = s.replace(/(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/)/g, m => stash('<span class="tok-cmt">'+m+'</span>'));
-  s = s.replace(/(&quot;(?:\\.|[^&\n])*?&quot;|&#39;(?:\\.|[^&\n])*?&#39;|`[^`\n]*`)/g, m => stash('<span class="tok-str">'+m+'</span>'));
-  s = s.replace(/\b(\d+(?:\.\d+)?)\b/g, '<span class="tok-num">$1</span>');
+  s = s.replace(/(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/|&quot;(?:\\.|[^&\n])*?&quot;|&#39;(?:\\.|[^&\n])*?&#39;|`[^`\n]*`)/g, m =>
+    stash(m, /^(&quot;|&#39;|`)/.test(m) ? 'tok-str' : 'tok-cmt'));
+  s = s.replace(/\b(\d+(?:\.\d+)?)\b/g, m => stash(m, 'tok-num'));
   s = s.replace(KW_RE, '<span class="tok-kw">$1</span>');
-  return s.replace(/\x00(\d+)\x00/g, (_,i) => tokens[i]);
+  return s.replace(/\uE000([\s\S])\uE001/g, (_, c) => tokens[c.charCodeAt(0) - 0xE100]);
 }
 
 function renderCodeBlock(block){
@@ -547,7 +603,9 @@ function renderEmpty(){
   if(show && !e){
     e=document.createElement('div'); e.id='empty';
     e.innerHTML='Say hi — <b>Sentinel</b> is your Hermes agent in the browser.<br>'+
-      'Type <b>/</b> for commands or <b>Ctrl+K</b> to search conversations.<br>'+
+      (isTouch
+        ? 'Type <b>/</b> for commands, or tap 🔍 to search conversations.<br>'
+        : 'Type <b>/</b> for commands or <b>Ctrl+K</b> to search conversations.<br>')+
       'Attach files or photos with 📎 — she can send files back too.';
     msgs.appendChild(e);
   } else if(!show && e){ e.remove(); }
@@ -592,7 +650,7 @@ function threadRow(t){
   d.className='thread'+(t.id===S.active?' active':'');
   d.innerHTML='<div class="thread-main"><div class="tt">'+(t.pinned?'<span class="pin-ic">📌</span>':'')+'<span>'+esc(t.title)+'</span></div><div class="ts">'+ago(t.lastTime||t.created)+'</div></div>'+
     '<button class="thread-act" title="Thread actions">⋯</button>';
-  d.onclick=()=>{ api('/api/active',{id:t.id}); if(innerWidth<=760) setSidebar(false); };
+  d.onclick=()=>{ api('/api/active',{id:t.id}); if(isNarrow()) setSidebar(false); };
   d.querySelector('.thread-act').onclick=(e)=>{ e.stopPropagation(); showThreadMenu(t, e.currentTarget); };
   return d;
 }
@@ -797,10 +855,11 @@ function renderSettingsTab(){
     body.innerHTML =
       '<div class="srow"><label>Thread sort order<span class="sdesc">Default sidebar ordering</span></label>'+
         '<select id="set-sort"><option value="recent"'+(sortBy==='recent'?' selected':'')+'>Recent activity</option><option value="created"'+(sortBy==='created'?' selected':'')+'>Creation date</option></select></div>'+
+      (hasKeyboard ?
       '<div class="srow"><label>Send key<span class="sdesc">How Enter behaves in the composer</span></label>'+
-        '<select id="set-enter"><option value="1"'+(enterToSend?' selected':'')+'>Enter to send</option><option value="0"'+(!enterToSend?' selected':'')+'>Ctrl/Cmd+Enter to send</option></select></div>';
+        '<select id="set-enter"><option value="1"'+(enterToSend?' selected':'')+'>Enter to send</option><option value="0"'+(!enterToSend?' selected':'')+'>Ctrl/Cmd+Enter to send</option></select></div>' : '');
     $('#set-sort').onchange = e => { sortBy=e.target.value; localStorage.setItem('sentinel_sort',sortBy); renderThreads(); };
-    $('#set-enter').onchange = e => { enterToSend=e.target.value==='1'; localStorage.setItem('sentinel_enter_send',e.target.value); };
+    if(hasKeyboard) $('#set-enter').onchange = e => { enterToSend=e.target.value==='1'; localStorage.setItem('sentinel_enter_send',e.target.value); };
   } else if(settingsTab === 'appearance'){
     body.innerHTML =
       '<div class="srow"><label>Chat font size<span class="sdesc">Base text size across messages</span></label>'+
@@ -1039,7 +1098,7 @@ function setSidebar(open){
   $('#sidebar').classList.toggle('open', !!open);
   $('#backdrop').classList.toggle('show', !!open);
 }
-function newChat(){ api('/api/new'); if(innerWidth<=760) setSidebar(false); }
+function newChat(){ api('/api/new'); if(isNarrow()) setSidebar(false); }
 function send(){
   const el=$('#input'); const text=el.value.trim();
   if(text.startsWith('/')){
@@ -1110,6 +1169,7 @@ $('#input').addEventListener('paste', e=>{
 });
 const mainEl = document.querySelector('main');
 let dragDepth = 0;
+if(!isTouch){
 mainEl.addEventListener('dragenter', e=>{
   if(e.dataTransfer && Array.from(e.dataTransfer.types||[]).includes('Files')){
     e.preventDefault(); dragDepth++; mainEl.classList.add('drop-active');
@@ -1127,6 +1187,7 @@ mainEl.addEventListener('drop', e=>{
   const files = e.dataTransfer && e.dataTransfer.files;
   if(files && files.length){ e.preventDefault(); uploadFiles(files); }
 });
+}
 
 msgs.addEventListener('click', e => {
   const mcp = e.target.closest('[data-msg-copy]');
@@ -1180,7 +1241,7 @@ msgs.addEventListener('click', e => {
 
 document.addEventListener('click', () => closeThreadMenu());
 window.addEventListener('keydown', e => {
-  if((e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='k'){
+  if(hasKeyboard && (e.ctrlKey||e.metaKey) && e.key.toLowerCase()==='k'){
     e.preventDefault();
     openSearchModal('');
   } else if(e.key==='Escape'){
@@ -1211,7 +1272,38 @@ if(new URLSearchParams(location.search).get('new')==='1'){
   history.replaceState(null,'','/');
   api('/api/new');
 }
-$('#input').focus();
+if(hasKeyboard) $('#input').focus();
+
+/* mobile: keyboard-aware height, draft scroll, edge-swipe drawer */
+function fitAppHeight(){
+  if(!isTouch || !window.visualViewport) return;
+  document.documentElement.style.setProperty('--app-h', Math.round(window.visualViewport.height)+'px');
+}
+if(isTouch){
+  if(window.visualViewport){
+    const vv = window.visualViewport;
+    vv.addEventListener('resize', ()=>{ fitAppHeight(); if(document.activeElement===$('#input')) scrollIfNear(true); });
+    vv.addEventListener('scroll', fitAppHeight);
+    fitAppHeight();
+  }
+  $('#searchbtn').title = 'Search conversations';
+  $('#input').placeholder = 'Message Sentinel…';
+  $('#input').addEventListener('focus', ()=>setTimeout(()=>scrollIfNear(true), 250));
+  let swipe = null;
+  document.addEventListener('touchstart', e => {
+    if(!isNarrow() || e.touches.length!==1 || document.querySelector('.modal-bg:not([hidden])')){ swipe=null; return; }
+    const t = e.touches[0];
+    swipe = {x:t.clientX, y:t.clientY, open:$('#sidebar').classList.contains('open'), done:false};
+  }, {passive:true});
+  document.addEventListener('touchmove', e => {
+    if(!swipe || swipe.done || e.touches.length!==1) return;
+    const t = e.touches[0], dx = t.clientX-swipe.x, dy = t.clientY-swipe.y;
+    if(Math.abs(dy) > Math.abs(dx)){ if(Math.abs(dy) > 16) swipe=null; return; }
+    if(!swipe.open && swipe.x < 24 && dx > 48){ swipe.done=true; setSidebar(true); }
+    else if(swipe.open && dx < -48){ swipe.done=true; setSidebar(false); }
+  }, {passive:true});
+  document.addEventListener('touchend', ()=>{ swipe=null; }, {passive:true});
+}
 if ('serviceWorker' in navigator) {
   addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(()=>{}));
 }
