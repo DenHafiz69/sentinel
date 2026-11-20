@@ -3,7 +3,7 @@ package main
 import "net/http"
 
 // Version can be overridden at build time via -ldflags "-X main.Version=x.y.z".
-var Version = "0.2.0"
+var Version = "0.2.1"
 
 type ChangelogEntry struct {
 	Version string   `json:"version"`
@@ -13,6 +13,16 @@ type ChangelogEntry struct {
 }
 
 var changelog = []ChangelogEntry{
+	{
+		Version: "0.2.1",
+		Date:    "2026-11-21",
+		Title:   "Message Actions, Drag & Drop, and Stream Recovery",
+		Items: []string{
+			"Added message Copy button and one-tap Retry on failed messages",
+			"Added clipboard image paste and drag-and-drop file uploads",
+			"Added mid-stream refresh recovery and SSE reconnect / session-expiry status",
+		},
+	},
 	{
 		Version: "0.2.0",
 		Date:    "2026-11-21",
