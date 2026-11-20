@@ -142,3 +142,114 @@ func TestPWAInstallAssets(t *testing.T) {
 		}
 	}
 }
+
+func TestUpdateCommandRegistered(t *testing.T) {
+	found := false
+	for _, c := range commandRegistry {
+		if c.Name == "/update" {
+			found = true
+			if c.TakesArgs {
+				t.Fatal("/update takes no arguments")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("/update missing from commandRegistry")
+	}
+}
+
+func TestUpdateRefusedWhenBusy(t *testing.T) {
+	dir := t.TempDir()
+	st := NewStore(dir)
+	srv := &Server{store: st, hub: NewHub(), dev: true, uploadDir: dir, jobs: make(chan Job, 4)}
+	srv.running = true
+	srv.runningThread = "t1"
+
+	rec := httptest.NewRecorder()
+	srv.handleUpdate(rec, httptest.NewRequest(http.MethodPost, "/api/update", nil))
+
+	var rep updateReport
+	if err := json.Unmarshal(rec.Body.Bytes(), &rep); err != nil {
+		t.Fatalf("bad response: %v %s", err, rec.Body.String())
+	}
+	if rep.OK || rep.Restarted || rep.Updated {
+		t.Fatalf("busy server must not update, got %+v", rep)
+	}
+	if !bytes.Contains([]byte(rep.Message), []byte("mid-reply")) {
+		t.Fatalf("expected a mid-reply refusal, got %q", rep.Message)
+	}
+	if msgs := st.Snapshot().Messages; len(msgs) != 0 {
+		t.Fatalf("refusal should not touch the transcript, got %d messages", len(msgs))
+	}
+}
+
+func TestUpdateRefusedWhenAlreadyRunning(t *testing.T) {
+	dir := t.TempDir()
+	st := NewStore(dir)
+	srv := &Server{store: st, hub: NewHub(), dev: true, uploadDir: dir, jobs: make(chan Job, 4)}
+	updateInFlight.Store(true)
+	defer updateInFlight.Store(false)
+
+	rec := httptest.NewRecorder()
+	srv.handleUpdate(rec, httptest.NewRequest(http.MethodPost, "/api/update", nil))
+
+	var rep updateReport
+	if err := json.Unmarshal(rec.Body.Bytes(), &rep); err != nil {
+		t.Fatalf("bad response: %v %s", err, rec.Body.String())
+	}
+	if rep.OK {
+		t.Fatalf("concurrent update must be refused, got %+v", rep)
+	}
+	if !bytes.Contains([]byte(rep.Message), []byte("already running")) {
+		t.Fatalf("expected an already-running refusal, got %q", rep.Message)
+	}
+	if !updateInFlight.Load() {
+		t.Fatal("the in-flight guard belongs to the original update and must stay set")
+	}
+}
+
+// Outside a real checkout the handler must fail closed and say so, without
+// touching the running binary.
+func TestUpdateOutsideCheckoutFailsClosed(t *testing.T) {
+	if _, err := updateRepoDir(); err == nil {
+		t.Skip("test binary lives inside a git checkout; nothing to assert")
+	}
+	dir := t.TempDir()
+	st := NewStore(dir)
+	srv := &Server{store: st, hub: NewHub(), dev: true, uploadDir: dir, jobs: make(chan Job, 4)}
+
+	rec := httptest.NewRecorder()
+	srv.handleUpdate(rec, httptest.NewRequest(http.MethodPost, "/api/update", nil))
+
+	var rep updateReport
+	if err := json.Unmarshal(rec.Body.Bytes(), &rep); err != nil {
+		t.Fatalf("bad response: %v %s", err, rec.Body.String())
+	}
+	if rep.OK || rep.Restarted {
+		t.Fatalf("expected a refusal outside a checkout, got %+v", rep)
+	}
+	if !bytes.Contains([]byte(rep.Message), []byte("no git checkout")) {
+		t.Fatalf("unexpected message %q", rep.Message)
+	}
+	msgs := st.Snapshot().Messages
+	if len(msgs) != 1 || msgs[0].Role != "error" {
+		t.Fatalf("expected one error notice in the transcript, got %+v", msgs)
+	}
+}
+
+func TestAddNoticeRoles(t *testing.T) {
+	dir := t.TempDir()
+	st := NewStore(dir)
+	st.NewThread()
+	st.AddUser("hello", nil)
+	st.AddNotice(st.Snapshot().Active, "assistant", "Updated 7dae566 → 0ccc8b8.")
+	st.AddError(st.Snapshot().Active, "Update failed: no git checkout")
+
+	msgs := st.Snapshot().Messages
+	if len(msgs) != 3 {
+		t.Fatalf("expected 3 messages, got %d", len(msgs))
+	}
+	if msgs[1].Role != "assistant" || msgs[2].Role != "error" {
+		t.Fatalf("unexpected roles %q/%q", msgs[1].Role, msgs[2].Role)
+	}
+}

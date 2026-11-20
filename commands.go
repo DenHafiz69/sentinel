@@ -19,6 +19,7 @@ var commandRegistry = []CommandSpec{
 	{Name: "/search", Usage: "/search [query]", Description: "Search conversation history", TakesArgs: true},
 	{Name: "/archive", Usage: "/archive", Description: "Archive current conversation"},
 	{Name: "/stop", Usage: "/stop", Description: "Stop active generation"},
+	{Name: "/update", Usage: "/update", Description: "Pull, rebuild and restart Sentinel"},
 }
 
 func (s *Server) handleCommands(w http.ResponseWriter, r *http.Request) {

@@ -279,13 +279,24 @@ func (s *Store) FinalizeAssistant(threadID string, id int64, text string, files 
 	return m
 }
 
-func (s *Store) AddError(threadID string, text string) Message {
+// AddNotice appends a Sentinel-generated message to a thread without involving
+// the agent: role "assistant" for a plain notice, "error" for a failure.
+func (s *Store) AddNotice(threadID, role, text string) Message {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	id := s.nextMsg
 	s.nextMsg++
-	m := Message{ID: id, Role: "error", Text: text, Time: nowSec()}
-	if t := s.find(threadID); t != nil {
+	m := Message{ID: id, Role: role, Text: text, Time: nowSec()}
+	t := s.find(threadID)
+	if t == nil {
+		t = s.find(s.active)
+	}
+	if t == nil {
+		// Nothing to append to yet (fresh data dir): open the thread the first
+		// message would have created so the notice is never lost.
+		t = s.find(s.newThreadLocked().ID)
+	}
+	if t != nil {
 		t.Messages = append(t.Messages, m)
 		if len(t.Messages) > 500 {
 			t.Messages = t.Messages[len(t.Messages)-500:]
@@ -293,6 +304,10 @@ func (s *Store) AddError(threadID string, text string) Message {
 		s.saveLocked()
 	}
 	return m
+}
+
+func (s *Store) AddError(threadID string, text string) Message {
+	return s.AddNotice(threadID, "error", text)
 }
 
 func (s *Store) RenameThread(id, title string) bool {

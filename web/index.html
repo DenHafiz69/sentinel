@@ -732,8 +732,33 @@ function execSlashCommand(cmd, arg){
     case '/search': openSearchModal(arg); return true;
     case '/archive': api('/api/thread/archive', {id:S.active, archived:true}); return true;
     case '/stop': api('/api/stop'); return true;
+    case '/update': runUpdate(); return true;
   }
   return false;
+}
+
+/* /update: pull + rebuild + restart Sentinel, then reload once it is back */
+async function runUpdate(){
+  toast('/update: checking origin…');
+  let d = {};
+  try{
+    const r = await fetch('/api/update', {method:'POST'});
+    d = await r.json().catch(()=>({}));
+    if(!r.ok && !d.message) d.message = 'update failed: HTTP '+r.status;
+  }catch(e){ toast('/update failed: '+e); return; }
+  toast(d.message || (d.ok ? 'updated' : 'update failed'));
+  if(d.restarted) waitForRestart();
+}
+function waitForRestart(){
+  let tries = 0;
+  const t = setInterval(async () => {
+    tries++;
+    try{
+      const r = await fetch('/healthz', {cache:'no-store'});
+      if(r.ok){ clearInterval(t); location.reload(); return; }
+    }catch(_){}
+    if(tries >= 60){ clearInterval(t); toast('Sentinel is taking a while to come back — reload when it does'); }
+  }, 1000);
 }
 
 /* composer */

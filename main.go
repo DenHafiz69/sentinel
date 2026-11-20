@@ -723,6 +723,7 @@ func main() {
 	mux.HandleFunc("POST /api/thread/clear", srv.authed(srv.handleThreadClear))
 	mux.HandleFunc("POST /api/send", srv.authed(srv.handleSend))
 	mux.HandleFunc("POST /api/stop", srv.authed(srv.handleStop))
+	mux.HandleFunc("POST /api/update", srv.authed(srv.handleUpdate))
 	mux.HandleFunc("POST /api/upload", srv.authed(srv.handleUpload))
 	mux.HandleFunc("GET /api/file", srv.authed(srv.handleFile))
 
