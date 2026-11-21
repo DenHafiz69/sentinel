@@ -11,7 +11,7 @@ package main
 // Configuration (all optional):
 //   SENTINEL_ALERT_TELEGRAM=0     disable alerts entirely
 //   SENTINEL_ALERT_CHAT_ID        override the destination chat
-//   SENTINEL_RUN_TIMEOUT          run limit, Go duration (default 15m)
+//   SENTINEL_RUN_TIMEOUT          run limit, Go duration (default 30m)
 
 import (
 	"context"

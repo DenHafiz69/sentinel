@@ -15,19 +15,36 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
-// defaultRunTimeout bounds a single webchat run. A browser chat that has been
-// silent for this long is almost always stuck on something that belongs in the
-// CLI or a cron job, so failing early with a clear message beats waiting half an
-// hour. Override with SENTINEL_RUN_TIMEOUT (e.g. "10m", "45m").
-const defaultRunTimeout = 15 * time.Minute
+// defaultRunTimeout bounds a single webchat run. It matches the old hardcoded
+// 30 minutes so an unconfigured deploy behaves exactly as before; long jobs get
+// more room through SENTINEL_RUN_TIMEOUT rather than by editing code.
+const defaultRunTimeout = 30 * time.Minute
 
 const (
-	minRunTimeout = 2 * time.Minute
+	minRunTimeout = 5 * time.Minute
 	maxRunTimeout = 180 * time.Minute
 )
+
+// runLimit resolves the active run limit. It is a variable so tests can shorten
+// it without waiting minutes.
+var runLimit = runTimeout
+
+// fmtLimit renders a duration the way a human writes it ("30m", "2h", "90s"),
+// so the failure message and the Telegram alert do not say "30m0s".
+func fmtLimit(d time.Duration) string {
+	switch {
+	case d%time.Hour == 0:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	case d%time.Minute == 0:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	default:
+		return d.String()
+	}
+}
 
 // runTimeout reads SENTINEL_RUN_TIMEOUT and clamps it to a sane range.
 func runTimeout() time.Duration {
@@ -50,6 +67,7 @@ type AgentResult struct {
 	SessionID  string
 	Activities []Activity
 	Stopped    bool // cancelled via /api/stop
+	TimedOut   bool // hit the run limit
 	StderrTail string
 	Err        error
 }
@@ -182,7 +200,7 @@ func runHermes(ctx context.Context, sessionName, model, query string, onDelta fu
 		args = append(args, "--model", model)
 	}
 
-	limit := runTimeout()
+	limit := runLimit()
 	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 
@@ -193,8 +211,20 @@ func runHermes(ctx context.Context, sessionName, model, query string, onDelta fu
 	cmd := exec.CommandContext(ctx, hermesBin(), args...)
 	cmd.Dir = homeDir
 	cmd.Env = append(os.Environ(), "PATH="+homeBin+":"+os.Getenv("PATH"))
-	// hermes spawns children that inherit stdout; without WaitDelay the parent
-	// keeps waiting on the pipe long after the deadline killed the process.
+	// hermes spawns tool subprocesses that inherit stdout. Killing only the
+	// direct child left them running and kept the pipe open, so the parent sat
+	// on a dead run for seconds: put the child in its own process group and kill
+	// the whole group on deadline/cancel, then stop waiting on the pipe.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		if err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL); err != nil && err != syscall.ESRCH {
+			return err
+		}
+		return nil
+	}
 	cmd.WaitDelay = 5 * time.Second
 	var errb cappedBuffer
 	cmd.Stderr = &errb
@@ -362,7 +392,8 @@ func runHermes(ctx context.Context, sessionName, model, query string, onDelta fu
 
 	switch ctx.Err() {
 	case context.DeadlineExceeded:
-		res.Err = fmt.Errorf("agent run exceeded the %s limit and was stopped", limit)
+		res.TimedOut = true
+		res.Err = fmt.Errorf("agent run exceeded the %s limit and was stopped", fmtLimit(limit))
 		return res
 	case context.Canceled:
 		res.Stopped = true

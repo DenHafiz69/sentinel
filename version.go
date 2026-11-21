@@ -18,8 +18,9 @@ var changelog = []ChangelogEntry{
 		Date:    "2026-11-21",
 		Title:   "Run Limits & Failure Alerts",
 		Items: []string{
-			"Added SENTINEL_RUN_TIMEOUT (default 15m, clamped 2m–3h) for a single chat run",
-			"Timeouts now name the actual limit and stop the child process promptly",
+			"Run limit is configurable: SENTINEL_RUN_TIMEOUT (default 30m, clamped 5m-3h)",
+			"A timed-out run keeps the partial reply instead of discarding the work",
+			"Timeouts name the actual limit and say how to raise it",
 			"Failed runs post a short alert to Telegram, throttled per thread and per hour",
 			"Chat shows whether the alert was delivered instead of failing silently",
 		},

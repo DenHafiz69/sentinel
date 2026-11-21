@@ -346,7 +346,21 @@ func (s *Server) runJob(job Job) {
 
 	switch {
 	case res.Err != nil:
+		// A run that died partway through may still have produced usable text.
+		// Keep it as the reply instead of throwing the work away, and say so.
+		partial := strings.TrimSpace(res.Text) != ""
+		if partial {
+			note := "\n\n_[run ended early: " + res.Err.Error() + "]_"
+			pm := s.store.FinalizeAssistant(job.Thread, job.MsgID, strings.TrimRight(res.Text, "\n")+note, extractAttachments(res.Text), res.Activities, res.SessionID)
+			s.broadcast("msg", map[string]any{"thread": job.Thread, "message": pm})
+		}
 		msg := "Agent run failed: " + res.Err.Error()
+		if res.TimedOut {
+			if partial {
+				msg += "\nThe partial reply was kept above."
+			}
+			msg += fmt.Sprintf("\nThe limit is %s; raise SENTINEL_RUN_TIMEOUT (or run long jobs from the CLI) if this needs longer.", fmtLimit(runLimit()))
+		}
 		if tail := strings.TrimSpace(res.StderrTail); tail != "" {
 			msg += "\n" + shorten(tail)
 		}

@@ -53,3 +53,82 @@ func TestRunTimeoutMessageNamesTheLimit(t *testing.T) {
 		t.Fatalf("runTimeout = %s", got)
 	}
 }
+
+func TestFmtLimit(t *testing.T) {
+	cases := map[time.Duration]string{
+		90 * time.Minute:        "90m",
+		2 * time.Hour:           "2h",
+		45 * time.Second:        "45s",
+		1500 * time.Millisecond: "1.5s",
+	}
+	for in, want := range cases {
+		if got := fmtLimit(in); got != want {
+			t.Errorf("fmtLimit(%s) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestRunJobKeepsPartialTextOnTimeout is the regression test for the failure
+// Hafiz kept hitting: a run that hit the limit threw away everything the agent
+// had already written and left only "Agent run failed: ...". The text must
+// survive, marked as ended early, with the error below it.
+func TestRunJobKeepsPartialTextOnTimeout(t *testing.T) {
+	oldHome, oldBin, oldData, oldLimit := homeDir, homeBin, dataDir, runLimit
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "bin")
+	if err := os.MkdirAll(bin, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(bin, "hermes")
+	body := "#!/bin/sh\nprintf '{\"type\":\"text\",\"text\":\"Half a report.\"}\\n'\n/bin/sleep 30\n"
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	homeDir, homeBin, dataDir = dir, bin, dir
+	runLimit = func() time.Duration { return 500 * time.Millisecond }
+	t.Cleanup(func() { homeDir, homeBin, dataDir, runLimit = oldHome, oldBin, oldData, oldLimit })
+	t.Setenv("PATH", "")
+
+	st := NewStore(dir)
+	srv := &Server{
+		store:        st,
+		hub:          NewHub(),
+		activeRuns:   map[string]*ThreadRun{},
+		threadQueues: map[string]chan Job{},
+	}
+	th := st.NewThread()
+	st.AddUser("write the notes", nil)
+	id := st.ReserveMsgID()
+
+	start := time.Now()
+	srv.runJob(Job{Thread: th.ID, MsgID: id, Query: "write the notes"})
+	if elapsed := time.Since(start); elapsed > 12*time.Second {
+		t.Fatalf("run was not cut off promptly: %s", elapsed)
+	}
+
+	got, ok := st.ThreadByID(th.ID)
+	if !ok {
+		t.Fatal("thread vanished")
+	}
+	var partial, failure string
+	for _, m := range got.Messages {
+		switch m.Role {
+		case "assistant":
+			partial = m.Text
+		case "error":
+			failure = m.Text
+		}
+	}
+	if !strings.Contains(partial, "Half a report.") {
+		t.Fatalf("partial reply was discarded, got %q", partial)
+	}
+	if !strings.Contains(partial, "run ended early") {
+		t.Errorf("partial reply is not marked as ended early: %q", partial)
+	}
+	if !strings.Contains(failure, "limit and was stopped") {
+		t.Errorf("failure message = %q", failure)
+	}
+	if !strings.Contains(failure, "SENTINEL_RUN_TIMEOUT") {
+		t.Errorf("failure message should say how to raise the limit: %q", failure)
+	}
+}
