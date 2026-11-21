@@ -3,7 +3,7 @@ package main
 import "net/http"
 
 // Version can be overridden at build time via -ldflags "-X main.Version=x.y.z".
-var Version = "0.2.5"
+var Version = "0.2.6"
 
 type ChangelogEntry struct {
 	Version string   `json:"version"`
@@ -13,6 +13,17 @@ type ChangelogEntry struct {
 }
 
 var changelog = []ChangelogEntry{
+	{
+		Version: "0.2.6",
+		Date:    "2026-11-21",
+		Title:   "Run Limits & Failure Alerts",
+		Items: []string{
+			"Added SENTINEL_RUN_TIMEOUT (default 15m, clamped 2m–3h) for a single chat run",
+			"Timeouts now name the actual limit and stop the child process promptly",
+			"Failed runs post a short alert to Telegram, throttled per thread and per hour",
+			"Chat shows whether the alert was delivered instead of failing silently",
+		},
+	},
 	{
 		Version: "0.2.5",
 		Date:    "2026-11-21",

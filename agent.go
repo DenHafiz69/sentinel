@@ -9,14 +9,41 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 )
+
+// defaultRunTimeout bounds a single webchat run. A browser chat that has been
+// silent for this long is almost always stuck on something that belongs in the
+// CLI or a cron job, so failing early with a clear message beats waiting half an
+// hour. Override with SENTINEL_RUN_TIMEOUT (e.g. "10m", "45m").
+const defaultRunTimeout = 15 * time.Minute
+
+const (
+	minRunTimeout = 2 * time.Minute
+	maxRunTimeout = 180 * time.Minute
+)
+
+// runTimeout reads SENTINEL_RUN_TIMEOUT and clamps it to a sane range.
+func runTimeout() time.Duration {
+	raw := strings.TrimSpace(os.Getenv("SENTINEL_RUN_TIMEOUT"))
+	if raw == "" {
+		return defaultRunTimeout
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil || d < minRunTimeout || d > maxRunTimeout {
+		// The rejected value is deliberately not logged: env values are tainted
+		// input and would be a log-injection vector.
+		log.Printf("sentinel: ignoring invalid SENTINEL_RUN_TIMEOUT, using %s", defaultRunTimeout)
+		return defaultRunTimeout
+	}
+	return d
+}
 
 type AgentResult struct {
 	Text       string
@@ -155,7 +182,8 @@ func runHermes(ctx context.Context, sessionName, model, query string, onDelta fu
 		args = append(args, "--model", model)
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	limit := runTimeout()
+	ctx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 
 	// The binary is resolved from fixed user-owned locations and every argument
@@ -165,6 +193,9 @@ func runHermes(ctx context.Context, sessionName, model, query string, onDelta fu
 	cmd := exec.CommandContext(ctx, hermesBin(), args...)
 	cmd.Dir = homeDir
 	cmd.Env = append(os.Environ(), "PATH="+homeBin+":"+os.Getenv("PATH"))
+	// hermes spawns children that inherit stdout; without WaitDelay the parent
+	// keeps waiting on the pipe long after the deadline killed the process.
+	cmd.WaitDelay = 5 * time.Second
 	var errb cappedBuffer
 	cmd.Stderr = &errb
 	stdout, err := cmd.StdoutPipe()
@@ -331,7 +362,7 @@ func runHermes(ctx context.Context, sessionName, model, query string, onDelta fu
 
 	switch ctx.Err() {
 	case context.DeadlineExceeded:
-		res.Err = errors.New("agent run exceeded the 30-minute budget and was stopped")
+		res.Err = fmt.Errorf("agent run exceeded the %s limit and was stopped", limit)
 		return res
 	case context.Canceled:
 		res.Stopped = true

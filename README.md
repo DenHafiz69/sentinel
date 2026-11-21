@@ -123,6 +123,31 @@ Configuration via environment:
 | `SENTINEL_UNIT` | systemd user unit that `/update` restarts | `hermes-webchat` |
 | `SENTINEL_INJECT_TOKEN` | shared secret for `POST /api/inject`; overrides the token file | unset |
 | `SENTINEL_TOKEN_FILE` | where the inject token lives | `~/.config/sentinel/inject.token` |
+| `SENTINEL_RUN_TIMEOUT` | limit for one chat run, Go duration; clamped to 2m–3h | `15m` |
+| `SENTINEL_ALERT_TELEGRAM` | `0` turns off run-failure alerts | alerts on |
+| `SENTINEL_ALERT_CHAT_ID` | override the Telegram destination | `TELEGRAM_HOME_CHANNEL` |
+
+## Run limits and failure alerts
+
+A webchat run is a child `hermes chat` process. It is killed at
+`SENTINEL_RUN_TIMEOUT`, and the chat shows
+`agent run exceeded the <limit> limit and was stopped`.
+
+When a run fails for any reason (timeout, crash, provider error) the server also
+posts a short plain-text alert to Telegram, so a failure that happens while the
+tab is closed is not lost. The message names the thread, the reason, the Hermes
+session and the time; the chat itself appends `_Alert sent to Telegram._` when the
+post succeeded.
+
+- Alerts use the Hermes bot: the token is read at startup from the allowlisted keys
+  of `$HERMES_HOME/.env` (`TELEGRAM_BOT_TOKEN`, `TELEGRAM_HOME_CHANNEL`) and is never
+  logged. `SENTINEL_ALERT_CHAT_ID` and `TELEGRAM_BOT_TOKEN` in the environment take
+  precedence.
+- Throttled to one alert per thread per 5 minutes and 10 per hour overall, so a
+  retry loop cannot flood the chat.
+- Delivery is best effort with an 8s timeout; a failure is logged, not retried.
+- `SENTINEL_ALERT_E2E=1 go test -run TestAlertE2E ./...` sends one real message to
+  prove the credentials work.
 
 Sample deployment files are in `deploy/`:
 - `sentinel.service` — systemd user unit

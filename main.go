@@ -65,6 +65,8 @@ type Server struct {
 
 	injectToken string // shared secret for POST /api/inject ("" disables it)
 
+	notifier *notifier // telegram alerts for failed runs; nil disables them
+
 	jobs chan Job // legacy fallback if initialized directly in tests
 
 	mu            sync.Mutex
@@ -349,6 +351,9 @@ func (s *Server) runJob(job Job) {
 			msg += "\n" + shorten(tail)
 		}
 		log.Printf("webchat job error (thread %s): %v", job.Thread, res.Err)
+		if s.alertRunFailure(job.Thread, session, res.Err) {
+			msg += "\n\n_Alert sent to Telegram._"
+		}
 		m := s.store.AddError(job.Thread, msg)
 		s.broadcast("msg", map[string]any{"thread": job.Thread, "message": m})
 	case res.Stopped:
@@ -1029,6 +1034,7 @@ func main() {
 		dev:          dev,
 		uploadDir:    uploadDir,
 		injectToken:  injectToken,
+		notifier:     newNotifier(),
 		jobs:         make(chan Job, 16),
 		threadQueues: map[string]chan Job{},
 		activeRuns:   map[string]*ThreadRun{},
