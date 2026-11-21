@@ -653,13 +653,28 @@ func (s *Server) handleModels(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// sentinelNote tells the agent, on every message, how this chat handles long
+// work: the run is bounded, anything longer goes to the background, and results
+// come back through the inject delivery path as real chat messages.
+func sentinelNote(thread string) string {
+	return fmt.Sprintf(
+		"[Sentinel house rules: this thread is %s and this run is capped at %s. "+
+			"If the task needs more than about 8 minutes of work, do not grind through it in this reply: "+
+			"start it in the background (terminal background=true, or a scheduled one-shot cron job) "+
+			"and finish the reply saying what is running and when it should be done. "+
+			"To post results back into this chat, schedule a one-shot cron whose deliver is sentinel:%s. "+
+			"On each new message, first report any background work that has finished, briefly.]",
+		thread, fmtLimit(runLimit()), thread)
+}
+
 // composeQuery shapes the message Hermes receives. Images follow the upstream
 // gateway convention (tui_gateway/session_history.py): reference by absolute
 // path and point the agent at vision_analyze, since one-shot mode has no
 // native image attach. Plain files are listed as paths the agent can open.
-func (s *Server) composeQuery(text string, files []Attachment) string {
+func composeQuery(thread, text string, files []Attachment) string {
+	note := sentinelNote(thread)
 	if len(files) == 0 {
-		return text
+		return text + "\n\n" + note
 	}
 	var lines []string
 	var plain []Attachment
@@ -680,9 +695,9 @@ func (s *Server) composeQuery(text string, files []Attachment) string {
 	}
 	suffix := strings.Join(lines, "\n")
 	if text != "" {
-		return text + "\n\n" + suffix
+		return text + "\n\n" + suffix + "\n\n" + note
 	}
-	return suffix
+	return suffix + "\n\n" + note
 }
 
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
@@ -735,7 +750,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	msgID := s.store.ReserveMsgID()
 	s.broadcast("msg", map[string]any{"thread": tl.ID, "message": msg})
 	select {
-	case q <- Job{Thread: tl.ID, MsgID: msgID, Query: s.composeQuery(text, files)}:
+	case q <- Job{Thread: tl.ID, MsgID: msgID, Query: composeQuery(tl.ID, text, files)}:
 	default:
 		http.Error(w, "queue full, try again shortly", http.StatusServiceUnavailable)
 		return
