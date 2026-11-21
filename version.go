@@ -3,7 +3,7 @@ package main
 import "net/http"
 
 // Version can be overridden at build time via -ldflags "-X main.Version=x.y.z".
-var Version = "0.2.6"
+var Version = "0.2.7"
 
 type ChangelogEntry struct {
 	Version string   `json:"version"`
@@ -13,6 +13,18 @@ type ChangelogEntry struct {
 }
 
 var changelog = []ChangelogEntry{
+	{
+		Version: "0.2.7",
+		Date:    "2026-11-21",
+		Title:   "Background Work House Rules",
+		Items: []string{
+			"Every message now tells the agent the run cap and to defer work longer than ~8 minutes to the background",
+			"Background results post back into the chat as real messages, via a one-shot cron with deliver=sentinel:<thread>",
+			"On each new message the agent first reports any background work that has finished",
+			"Live run cap drops from 45m to 10m (SENTINEL_RUN_TIMEOUT in the service unit)",
+			"composeQuery carries the thread id; compose_test.go pins the house-rules note to every message, file-only ones included",
+		},
+	},
 	{
 		Version: "0.2.6",
 		Date:    "2026-11-21",
