@@ -138,9 +138,23 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
 .tok-num{color:#f78c6c}
 .tok-cmt{color:#676e95;font-style:italic}
 /* attachments */
-.att-img{display:block;max-width:300px;max-height:300px;border-radius:9px;margin:6px 0}
+.att-img{display:block;max-width:300px;max-height:300px;border-radius:9px;margin:6px 0;cursor:zoom-in}
 .att-video{display:block;max-width:min(360px,100%);max-height:280px;border-radius:9px;margin:6px 0;background:#000}
 .att-audio{display:block;width:min(320px,100%);margin:6px 0}
+.date-sep{display:flex;align-items:center;justify-content:center;margin:14px 0 8px}
+.date-sep span{font-size:11.5px;color:var(--dim);background:var(--side);border:1px solid var(--line);border-radius:999px;padding:3px 11px}
+#jump-bottom{position:absolute;right:clamp(16px,4vw,48px);bottom:82px;z-index:15;background:var(--side2);color:var(--txt);border:1px solid var(--line);border-radius:999px;padding:7px 13px;font-size:12.5px;font-weight:600;cursor:pointer;box-shadow:0 6px 18px rgba(0,0,0,.45)}
+#jump-bottom:hover{border-color:var(--accent);color:#fff}
+#jump-bottom[hidden]{display:none}
+#lightbox{position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.88);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:calc(16px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom))}
+#lightbox[hidden]{display:none}
+#lb-bar{position:absolute;top:calc(12px + env(safe-area-inset-top));right:16px;display:flex;gap:8px;align-items:center}
+#lb-bar a,#lb-bar button{background:rgba(29,31,35,.9);border:1px solid var(--line);color:var(--txt);border-radius:9px;padding:7px 12px;font-size:13px;text-decoration:none;cursor:pointer}
+#lb-bar a:hover,#lb-bar button:hover{border-color:var(--accent)}
+#lb-img{max-width:94vw;max-height:82dvh;border-radius:10px;object-fit:contain;box-shadow:0 12px 36px rgba(0,0,0,.6)}
+.chip.uploading{opacity:.75;border-style:dashed}
+.chip .spin{display:inline-block;animation:spin 1s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
 .att-file{display:flex;align-items:center;gap:9px;background:#0b0c0e;border:1px solid var(--line);border-radius:9px;padding:9px 12px;margin:6px 0;color:var(--txt);text-decoration:none;max-width:320px}
 .att-file:hover{border-color:var(--accent)}
 .att-file .fname{flex:1;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -347,6 +361,7 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
       </div>
     </header>
     <div id="msgs"></div>
+    <button id="jump-bottom" hidden aria-label="Jump to latest">↓ Latest</button>
     <div id="activity-panel" hidden></div>
     <div id="composer">
       <div id="cmd-popup" hidden></div>
@@ -461,6 +476,14 @@ main.drop-active::after{content:"Drop files to attach";position:absolute;inset:1
       </div>
     </div>
   </div>
+</div>
+
+<div id="lightbox" hidden>
+  <div id="lb-bar">
+    <a id="lb-dl" href="#" download>Download</a>
+    <button id="lb-close" aria-label="Close image">✕</button>
+  </div>
+  <img id="lb-img" src="" alt="">
 </div>
 
 <div id="toast"></div>
@@ -629,11 +652,67 @@ function blockMD(raw){
   return out.join('<br>').replace(/(<\/div>|<\/blockquote>)<br>/g, '$1');
 }
 
+function renderStreamMD(src){
+  const s = String(src||'');
+  const fences = (s.match(/```/g)||[]).length;
+  return renderMD(fences % 2 === 1 ? s + '\n```' : s);
+}
+function dayKey(ts){
+  const d = new Date((ts||0)*1000);
+  return d.getFullYear()+'-'+(d.getMonth()+1)+'-'+d.getDate();
+}
+function formatDayLabel(ts){
+  const d = new Date((ts||0)*1000);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const target = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+  const diff = Math.round((today - target) / 86400000);
+  if(diff === 0) return 'Today';
+  if(diff === 1) return 'Yesterday';
+  const opts = d.getFullYear() === now.getFullYear() ? {month:'short', day:'numeric'} : {month:'short', day:'numeric', year:'numeric'};
+  return d.toLocaleDateString([], opts);
+}
+function makeDateSep(ts){
+  const el = document.createElement('div');
+  el.className = 'date-sep';
+  el.dataset.day = dayKey(ts);
+  el.innerHTML = '<span>'+esc(formatDayLabel(ts))+'</span>';
+  return el;
+}
+function updateJumpBtn(){
+  const btn = $('#jump-bottom');
+  if(!btn) return;
+  const hidden = nearBottom() || msgs.scrollHeight <= msgs.clientHeight + 80;
+  btn.hidden = hidden;
+}
+function openLightbox(src, name){
+  $('#lb-img').src = src;
+  $('#lb-img').alt = name || '';
+  $('#lb-dl').href = src;
+  $('#lb-dl').download = name || 'image';
+  $('#lightbox').hidden = false;
+}
+function closeLightbox(){
+  $('#lightbox').hidden = true;
+  $('#lb-img').src = '';
+}
+function draftKey(tid){ return tid ? 'sentinel_draft_' + tid : ''; }
+function saveDraft(tid, val){
+  const k = draftKey(tid);
+  if(!k) return;
+  try { if(val) localStorage.setItem(k, val); else localStorage.removeItem(k); } catch(_) {}
+}
+function loadDraft(tid){
+  const k = draftKey(tid);
+  if(!k) return '';
+  try { return localStorage.getItem(k) || ''; } catch(_) { return ''; }
+}
+
 /* rendering */
 function filesHTML(files){
   return (files||[]).map(f=>{
     const url='/api/file?path='+encodeURIComponent(f.path);
-    if(f.kind==='image') return '<a href="'+url+'" target="_blank" rel="noopener"><img class="att-img" loading="lazy" src="'+url+'" alt="'+esc(f.name)+'"></a>';
+    if(f.kind==='image') return '<img class="att-img" loading="lazy" src="'+url+'" alt="'+esc(f.name)+'" data-lb-src="'+esc(url)+'" data-lb-name="'+esc(f.name)+'">';
     if(f.kind==='video') return '<video class="att-video" controls preload="metadata" src="'+url+'"></video><a class="att-file" href="'+url+'" download="'+esc(f.name)+'"><span>🎬</span><span class="fname">'+esc(f.name)+'</span><span class="fsize">'+fmtSize(f.size)+'</span></a>';
     if(f.kind==='audio') return '<audio class="att-audio" controls preload="metadata" src="'+url+'"></audio>';
     return '<a class="att-file" href="'+url+'" download="'+esc(f.name)+'"><span>📄</span><span class="fname">'+esc(f.name)+'</span><span class="fsize">'+fmtSize(f.size)+'</span></a>';
@@ -805,11 +884,19 @@ function ensureStream(id){
 function renderMessages(list){
   currentMsgs = list || [];
   msgs.innerHTML='';
-  for(const m of currentMsgs) msgs.appendChild(bubble(m,false));
+  let lastDay = '';
+  for(const m of currentMsgs){
+    const dk = m.time ? dayKey(m.time) : '';
+    if(dk && dk !== lastDay){
+      msgs.appendChild(makeDateSep(m.time));
+      lastDay = dk;
+    }
+    msgs.appendChild(bubble(m,false));
+  }
   for(const id of Object.keys(streamBuf)){
     if(streamThread[id]===S.active){
       const el=ensureStream(id);
-      el.querySelector('.raw').textContent=streamBuf[id];
+      el.querySelector('.raw').innerHTML=renderStreamMD(streamBuf[id]);
     }
   }
   renderEmpty();
@@ -820,10 +907,12 @@ function renderMessages(list){
       target.scrollIntoView({behavior:'smooth', block:'center'});
       target.classList.add('jump-hit');
       setTimeout(()=>target.classList.remove('jump-hit'), 2200);
+      updateJumpBtn();
       return;
     }
   }
   scrollIfNear(true);
+  updateJumpBtn();
 }
 
 /* state events */
@@ -833,8 +922,15 @@ function applySnap(d){
     fetch('/api/state?thread='+encodeURIComponent(clientThread)).then(r=>r.json()).then(applySnap).catch(()=>{});
     return;
   }
+  const prevActive = S.active;
   const wasRunning=S.running;
   S.threads=list; S.active=d.active;
+  if(prevActive !== S.active){
+    const inp = $('#input');
+    if(prevActive) saveDraft(prevActive, inp.value);
+    inp.value = loadDraft(S.active);
+    autosize();
+  }
   if(!seenInit){
     seenInit = true;
     for(const t of list){ if(t.lastMsgId) seenMsgs[t.id] = t.lastMsgId; }
@@ -878,12 +974,20 @@ function onMsg(d){
   }
   if(d.thread===S.active){
     markThreadSeen(d.thread, d.message.id);
+    const prevMsg = currentMsgs.length ? currentMsgs[currentMsgs.length-1] : null;
     currentMsgs.push(d.message);
     const nb=bubble(d.message,false);
     const el=msgs.querySelector('.msg[data-id="'+d.message.id+'"]');
-    if(el) el.replaceWith(nb); else msgs.appendChild(nb);
+    if(el) el.replaceWith(nb);
+    else {
+      if(d.message.time && (!prevMsg || !prevMsg.time || dayKey(prevMsg.time) !== dayKey(d.message.time))){
+        msgs.appendChild(makeDateSep(d.message.time));
+      }
+      msgs.appendChild(nb);
+    }
     renderEmpty();
     scrollIfNear(true);
+    updateJumpBtn();
   }
   renderThreads();
 }
@@ -893,8 +997,9 @@ function onDelta(d){
   streamThread[d.id]=d.thread;
   if(d.thread!==S.active) return;
   const el=ensureStream(d.id);
-  el.querySelector('.raw').textContent=d.text;
+  el.querySelector('.raw').innerHTML=renderStreamMD(d.text);
   scrollIfNear();
+  updateJumpBtn();
 }
 function onActivity(d){
   if(d.thread===S.active){ S.activities = d.activities||[]; renderActivityPanel(); }
@@ -1257,12 +1362,18 @@ function autosize(){ const el=$('#input'); el.style.height='auto'; el.style.heig
 function renderChips(){
   const c=$('#chips'); c.innerHTML='';
   pending.forEach((f,i)=>{
-    const d=document.createElement('div'); d.className='chip';
-    d.innerHTML=(f.url?'<img src="'+f.url+'">':'<span>📄</span>')+'<span class="cn">'+esc(f.name)+'</span>';
-    const x=document.createElement('button'); x.textContent='×';
-    x.onclick=()=>{ pending.splice(i,1); renderChips(); };
-    d.appendChild(x); c.appendChild(d);
+    const d=document.createElement('div'); d.className='chip'+(f.uploading?' uploading':'');
+    if(f.uploading){
+      d.innerHTML='<span class="spin">⟳</span><span class="cn">Uploading '+esc(f.name)+'…</span>';
+    } else {
+      d.innerHTML=(f.url?'<img src="'+f.url+'">':'<span>📄</span>')+'<span class="cn">'+esc(f.name)+'</span>';
+      const x=document.createElement('button'); x.textContent='×';
+      x.onclick=()=>{ pending.splice(i,1); renderChips(); };
+      d.appendChild(x);
+    }
+    c.appendChild(d);
   });
+  $('#send').disabled = pending.some(p => p.uploading);
 }
 function setSidebar(open){
   $('#sidebar').classList.toggle('open', !!open);
@@ -1284,10 +1395,11 @@ function send(){
       el.value=''; autosize(); $('#cmd-popup').hidden=true; return;
     }
   }
+  if(pending.some(p => p.uploading)){ toast('Wait for upload to finish'); return; }
   if(!text && !pending.length) return;
   const files=pending.map(f=>({path:f.path,name:f.name}));
   pending.length=0; renderChips();
-  el.value=''; autosize(); $('#cmd-popup').hidden=true;
+  el.value=''; saveDraft(S.active, ''); autosize(); $('#cmd-popup').hidden=true;
   api('/api/send',{thread:S.active,text,files}).then(r=>{ if(!r.ok) r.text().then(t=>toast('send failed: '+t)); })
     .catch(e=>toast('send failed: '+e));
 }
@@ -1305,7 +1417,11 @@ $('#input').addEventListener('keydown',e=>{
   const sendCombo = enterToSend ? (e.key==='Enter' && !e.shiftKey) : (e.key==='Enter' && (e.ctrlKey||e.metaKey));
   if(sendCombo){ e.preventDefault(); send(); }
 });
-$('#input').addEventListener('input',()=>{ autosize(); cmdIdx=0; updateCmdPopup(); });
+$('#input').addEventListener('input',()=>{ autosize(); saveDraft(S.active, $('#input').value); cmdIdx=0; updateCmdPopup(); });
+msgs.addEventListener('scroll', updateJumpBtn, {passive:true});
+$('#jump-bottom').onclick=()=>{ msgs.scrollTo({top:msgs.scrollHeight, behavior:'smooth'}); };
+$('#lb-close').onclick=closeLightbox;
+$('#lightbox').onclick=e=>{ if(e.target===$('#lightbox')) closeLightbox(); };
 $('#newbtn').onclick=newChat;
 $('#searchbtn').onclick=()=>openSearchModal('');
 $('#sortbtn').onclick=()=>{
@@ -1324,15 +1440,25 @@ $('#attach').onclick=()=>$('#file').click();
 async function uploadFiles(fileList){
   if(!fileList || !fileList.length) return;
   for(const f of fileList){
+    const stub = {uploading:true, name:f.name};
+    pending.push(stub);
+    renderChips();
     const fd=new FormData(); fd.append('file',f);
     try{
       const r=await fetch('/api/upload',{method:'POST',body:fd});
       if(!r.ok) throw new Error(await r.text());
       const d=await r.json();
-      d.files.forEach(a=>pending.push({...a,url:(a.kind==='image')?URL.createObjectURL(f):null}));
-    }catch(err){ toast('upload failed: '+err); }
+      const idx = pending.indexOf(stub);
+      const uploaded = d.files.map(a=>({...a,url:(a.kind==='image')?URL.createObjectURL(f):null}));
+      if(idx >= 0) pending.splice(idx, 1, ...uploaded);
+      else pending.push(...uploaded);
+    }catch(err){
+      const idx = pending.indexOf(stub);
+      if(idx >= 0) pending.splice(idx, 1);
+      toast('upload failed: '+err);
+    }
+    renderChips();
   }
-  renderChips();
 }
 $('#file').addEventListener('change',async e=>{
   await uploadFiles(e.target.files);
@@ -1365,6 +1491,8 @@ mainEl.addEventListener('drop', e=>{
 }
 
 msgs.addEventListener('click', e => {
+  const lb = e.target.closest('[data-lb-src]');
+  if(lb){ openLightbox(lb.dataset.lbSrc, lb.dataset.lbName); return; }
   const mcp = e.target.closest('[data-msg-copy]');
   if(mcp){
     const m = msgStore[mcp.dataset.msgCopy];
@@ -1420,6 +1548,7 @@ window.addEventListener('keydown', e => {
     e.preventDefault();
     openSearchModal('');
   } else if(e.key==='Escape'){
+    closeLightbox();
     closeThreadMenu();
     setSidebar(false);
     if(!$('#whatsnew-modal').hidden) markChangelogSeen();
