@@ -3,7 +3,7 @@ package main
 import "net/http"
 
 // Version can be overridden at build time via -ldflags "-X main.Version=x.y.z".
-var Version = "0.2.9"
+var Version = "0.2.10"
 
 type ChangelogEntry struct {
 	Version string   `json:"version"`
@@ -13,6 +13,17 @@ type ChangelogEntry struct {
 }
 
 var changelog = []ChangelogEntry{
+	{
+		Version: "0.2.10",
+		Date:    "2026-11-25",
+		Title:   "Live Streaming Markdown, Lightbox, Drafts & Upload Progress",
+		Items: []string{
+			"Rendered Markdown live during 250ms streaming deltas with a floating Jump to Latest pill",
+			"Added date dividers (Today, Yesterday, date) between multi-day messages",
+			"Added an in-app fullscreen image lightbox with Download and Escape/backdrop close",
+			"Added per-thread composer draft persistence and uploading spinner chips",
+		},
+	},
 	{
 		Version: "0.2.9",
 		Date:    "2026-11-25",
