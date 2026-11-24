@@ -477,7 +477,7 @@ let showArchived = false;
 let cmdIdx = 0;
 let cmdFiltered = [];
 let pendingJumpMsg = null;
-const streamBuf = {};    // msgID -> accumulated delta text
+const streamBuf = {};    // msgID -> latest cumulative partial text
 const streamThread = {}; // msgID -> thread id
 const pending = [];      // uploads waiting to be sent
 let elapsedStart = 0, toastT = null, searchT = null;
@@ -796,11 +796,12 @@ function onMsg(d){
   scrollIfNear(true);
 }
 function onDelta(d){
-  streamBuf[d.id]=(streamBuf[d.id]||'')+d.text;
+  // d.text is cumulative (the full reply so far), not a fragment: replace, don't append.
+  streamBuf[d.id]=d.text;
   streamThread[d.id]=d.thread;
   if(d.thread!==S.active) return;
   const el=ensureStream(d.id);
-  el.querySelector('.raw').textContent+=d.text;
+  el.querySelector('.raw').textContent=d.text;
   scrollIfNear();
 }
 function onActivity(d){

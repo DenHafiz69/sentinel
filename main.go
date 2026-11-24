@@ -54,6 +54,7 @@ type ThreadRun struct {
 	Text       strings.Builder
 	Activities []Activity
 	Cancel     context.CancelFunc
+	LastFlush  time.Time // last time a cumulative "delta" event was broadcast
 }
 
 type Server struct {
@@ -79,6 +80,11 @@ type Server struct {
 
 	threadQueues map[string]chan Job
 	activeRuns   map[string]*ThreadRun
+
+	// shutdownCh is closed by hs.RegisterOnShutdown so the SSE stream
+	// handlers return and http.Server.Shutdown does not stall on them.
+	// nil in tests: a nil channel never fires, so handlers behave as before.
+	shutdownCh <-chan struct{}
 }
 
 type ctxKey int
@@ -120,7 +126,8 @@ func (h *Hub) Send(b []byte) {
 	for c := range h.clients {
 		select {
 		case c <- b:
-		default: // slow client drops an event; snapshot-on-reconnect heals
+		default: // slow client drops an event; the next coalesced delta
+			// or the run-end snapshot carries the full text again
 		}
 	}
 	h.mu.Unlock()
@@ -272,6 +279,10 @@ func (s *Server) deny(w http.ResponseWriter, r *http.Request) {
 
 // ---------- agent worker ----------
 
+// How often a running reply streams a cumulative "delta" event. Bounded so a
+// fast model does not flood slow clients, small enough to feel live.
+const streamFlushInterval = 250 * time.Millisecond
+
 func (s *Server) threadQueue(threadID string) chan Job {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -326,8 +337,18 @@ func (s *Server) runJob(job Job) {
 	res := runHermes(ctx, session, model, job.Query, func(delta string) {
 		s.mu.Lock()
 		ar.Text.WriteString(delta)
+		text := ar.Text.String()
+		flush := time.Since(ar.LastFlush) >= streamFlushInterval
+		if flush {
+			ar.LastFlush = time.Now()
+		}
 		s.mu.Unlock()
-		s.broadcast("delta", map[string]any{"thread": job.Thread, "id": job.MsgID, "text": delta})
+		// Coalesced: at most one event per interval, and each event carries
+		// the full text so far, so a client that misses one is healed by the
+		// next instead of silently losing a chunk until the run ends.
+		if flush {
+			s.broadcast("delta", map[string]any{"thread": job.Thread, "id": job.MsgID, "text": text})
+		}
 	}, func(acts []Activity) {
 		s.mu.Lock()
 		ar.Activities = acts
@@ -365,7 +386,7 @@ func (s *Server) runJob(job Job) {
 			msg += "\n" + shorten(tail)
 		}
 		log.Printf("webchat job error (thread %s): %v", job.Thread, res.Err)
-		if s.alertRunFailure(job.Thread, session, res.Err) {
+		if s.alertRunFailure(job.Thread, session, res.Err, res.Text) {
 			msg += "\n\n_Alert sent to Telegram._"
 		}
 		m := s.store.AddError(job.Thread, msg)
@@ -466,6 +487,10 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-s.shutdownCh:
+			// Server is draining: release the connection so Shutdown
+			// can finish; the EventSource client reconnects on its own.
 			return
 		case <-tick.C:
 			fmt.Fprint(w, ": ping\n\n")
@@ -1056,6 +1081,7 @@ func main() {
 		injectToken = ""
 	}
 
+	shutdownCh := make(chan struct{})
 	srv := &Server{
 		store:        store,
 		hub:          NewHub(),
@@ -1067,6 +1093,7 @@ func main() {
 		jobs:         make(chan Job, 16),
 		threadQueues: map[string]chan Job{},
 		activeRuns:   map[string]*ThreadRun{},
+		shutdownCh:   shutdownCh,
 	}
 	sigCtx, stopSig := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSig()
@@ -1107,6 +1134,9 @@ func main() {
 	mux.HandleFunc("POST /api/inject", srv.injectGuard(srv.handleInject))
 
 	hs := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	// Closing this makes every SSE handler return, so Shutdown does not sit
+	// out its whole grace period waiting on the tunnel's open event streams.
+	hs.RegisterOnShutdown(func() { close(shutdownCh) })
 	// #nosec G706 — addr/team/aud come from this service's own systemd
 	// Environment= lines, not from requests; they are control-stripped anyway.
 	log.Printf("sentinel listening on http://%s (dev=%v, access team=%s, aud=%s)",

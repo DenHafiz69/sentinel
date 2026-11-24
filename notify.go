@@ -26,11 +26,13 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 const (
 	alertCooldown  = 5 * time.Minute // per thread
 	alertMaxPerHr  = 10              // across all threads
+	alertTailChars = 200             // bytes of a partial reply that go into an alert
 	alertMaxChars  = 3500
 	alertsDisabled = "0"
 )
@@ -141,7 +143,9 @@ func readEnvAllowlist(path string, keys []string) map[string]string {
 
 // AlertRunFailure reports a failed run and returns whether it reached the user.
 // key is the thread id, so one broken thread cannot spam the chat.
-func (n *notifier) AlertRunFailure(ctx context.Context, title, threadID, sessionName string, runErr error) bool {
+// partial is the run's text so far, when any: its tail goes into the alert so
+// the message is actionable without opening the chat.
+func (n *notifier) AlertRunFailure(ctx context.Context, title, threadID, sessionName string, runErr error, partial string) bool {
 	if n == nil || runErr == nil {
 		return false
 	}
@@ -156,6 +160,9 @@ func (n *notifier) AlertRunFailure(ctx context.Context, title, threadID, session
 		fmt.Fprintf(&b, "Thread: %s\n", t)
 	}
 	fmt.Fprintf(&b, "Reason: %s\n", oneLine(runErr.Error()))
+	if tail := replyTail(partial, alertTailChars); tail != "" {
+		fmt.Fprintf(&b, "Partial reply: %s\n", tail)
+	}
 	if s := strings.TrimSpace(sessionName); s != "" {
 		fmt.Fprintf(&b, "Session: %s\n", s)
 	}
@@ -243,6 +250,20 @@ func oneLine(s string) string {
 	return s
 }
 
+// replyTail returns the last n bytes of s, cut on a rune boundary so the
+// alert never shows half a character. Empty input stays empty.
+func replyTail(s string, n int) string {
+	s = strings.TrimSpace(s)
+	if n <= 0 || len(s) <= n {
+		return oneLine(s)
+	}
+	cut := len(s) - n
+	for cut < len(s) && !utf8.RuneStart(s[cut]) {
+		cut++
+	}
+	return "…" + oneLine(strings.TrimSpace(s[cut:]))
+}
+
 // redact strips the bot token from transport errors.
 func redact(err error, token string) error {
 	if err == nil || token == "" {
@@ -253,8 +274,8 @@ func redact(err error, token string) error {
 }
 
 // alertRunFailure reports a failed run, capped so a slow Telegram call cannot
-// hold up the UI update for long.
-func (s *Server) alertRunFailure(threadID, session string, err error) bool {
+// hold up the UI update for long. partial is the run's text so far, if any.
+func (s *Server) alertRunFailure(threadID, session string, err error, partial string) bool {
 	if s.notifier == nil || err == nil {
 		return false
 	}
@@ -264,5 +285,5 @@ func (s *Server) alertRunFailure(threadID, session string, err error) bool {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
 	defer cancel()
-	return s.notifier.AlertRunFailure(ctx, title, threadID, session, err)
+	return s.notifier.AlertRunFailure(ctx, title, threadID, session, err, partial)
 }

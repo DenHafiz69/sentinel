@@ -127,11 +127,42 @@ func (s *Store) saveLocked() {
 		return
 	}
 	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0600); err == nil {
-		if err := os.Rename(tmp, s.path); err != nil {
-			log.Printf("webchat: state rename failed: %v", err)
-		}
+	// Write and fsync the temp file before the rename: without the Sync a
+	// power cut can commit the rename while the data blocks are still in
+	// flight, leaving state.json empty and losing every thread.
+	if err := writeSynced(tmp, b, 0o600); err != nil {
+		log.Printf("webchat: state temp write failed: %v", err)
+		return
 	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		log.Printf("webchat: state rename failed: %v", err)
+		return
+	}
+	// fsync the directory so the rename itself is durable too.
+	// #nosec G304 — dir is the store's own data directory, never request input.
+	if d, err := os.Open(filepath.Dir(s.path)); err == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+}
+
+// writeSynced writes b to path and fsyncs it, so a later rename over it cannot
+// outrun the data on a crash.
+func writeSynced(path string, b []byte, mode os.FileMode) error {
+	// #nosec G304 — path is the store's temp file next to state.json, not user input.
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, mode)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		_ = f.Close()
+		return err
+	}
+	return f.Close()
 }
 
 func lite(t *Thread) ThreadLite {

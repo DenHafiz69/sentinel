@@ -382,3 +382,36 @@ func TestClientThreadFileScopeReaperAndExport(t *testing.T) {
 		}
 	}
 }
+
+// TestSaveWritesDurableState proves the store's save path leaves a complete,
+// 0600 state.json and no temp residue — the fsync-then-rename contract that
+// keeps every thread across a crash or power cut.
+func TestSaveWritesDurableState(t *testing.T) {
+	dir := t.TempDir()
+	st := NewStore(dir)
+	th := st.NewThread()
+	st.AddUser("hello there", nil)
+
+	path := filepath.Join(dir, "state.json")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("state.json not written: %v", err)
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.Mode().Perm() != 0o600 {
+		t.Fatalf("state.json perms = %v, want 0600 (err %v)", fi.Mode().Perm(), err)
+	}
+	var raw struct {
+		Threads []Thread `json:"threads"`
+		Active  string   `json:"active"`
+	}
+	if err := json.Unmarshal(b, &raw); err != nil {
+		t.Fatalf("state.json is not valid JSON: %v", err)
+	}
+	if len(raw.Threads) != 1 || raw.Threads[0].ID != th.ID {
+		t.Fatalf("round trip lost the thread: %+v", raw.Threads)
+	}
+	if _, err := os.Stat(path + ".tmp"); !os.IsNotExist(err) {
+		t.Errorf("leftover state.json.tmp: %v", err)
+	}
+}
