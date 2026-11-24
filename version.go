@@ -3,7 +3,7 @@ package main
 import "net/http"
 
 // Version can be overridden at build time via -ldflags "-X main.Version=x.y.z".
-var Version = "0.2.8"
+var Version = "0.2.9"
 
 type ChangelogEntry struct {
 	Version string   `json:"version"`
@@ -13,6 +13,18 @@ type ChangelogEntry struct {
 }
 
 var changelog = []ChangelogEntry{
+	{
+		Version: "0.2.9",
+		Date:    "2026-11-25",
+		Title:   "Unread Badges, Richer Markdown & Auth/Worker Hardening",
+		Items: []string{
+			"Added unread indicators on sidebar threads when replies or background deliveries arrive in other chats",
+			"Upgraded Markdown rendering with tables, blockquotes, [label](url) links, and italics",
+			"Deleting a thread now cancels any active run and closes its worker goroutine",
+			"Sidebar thread titles and timestamps now update immediately on incoming msg events",
+			"Hardened Cloudflare Access auth: fail closed on missing CF_ACCESS_TEAM/CF_AUD, removed CF_AUD='-' bypass, and added optional ALLOWED_EMAILS allowlist",
+		},
+	},
 	{
 		Version: "0.2.8",
 		Date:    "2026-11-25",
