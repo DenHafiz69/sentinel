@@ -58,11 +58,12 @@ type ThreadRun struct {
 }
 
 type Server struct {
-	store     *Store
-	hub       *Hub
-	auth      *AccessAuth
-	dev       bool
-	uploadDir string
+	store         *Store
+	hub           *Hub
+	auth          *AccessAuth
+	allowedEmails map[string]bool
+	dev           bool
+	uploadDir     string
 
 	injectToken string // shared secret for POST /api/inject ("" disables it)
 
@@ -234,6 +235,26 @@ func (s *Server) snapshotPayloadFor(threadID string) map[string]any {
 
 // ---------- auth middleware ----------
 
+func parseAllowedEmails(raw string) map[string]bool {
+	out := map[string]bool{}
+	for _, part := range strings.Split(raw, ",") {
+		if e := strings.ToLower(strings.TrimSpace(part)); e != "" {
+			out[e] = true
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+func (s *Server) isEmailAllowed(email string) bool {
+	if len(s.allowedEmails) == 0 {
+		return true
+	}
+	return s.allowedEmails[strings.ToLower(strings.TrimSpace(email))]
+}
+
 func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		if s.dev {
@@ -261,6 +282,13 @@ func (s *Server) authed(next http.HandlerFunc) http.HandlerFunc {
 			s.deny(w, r)
 			return
 		}
+		if !s.isEmailAllowed(email) {
+			// #nosec G706 — control characters are stripped by sanitizeLog
+			// and %q quotes the result, so no log forging is possible.
+			log.Printf("access denied (%q): email %q not in ALLOWED_EMAILS", sanitizeLog(r.URL.Path), sanitizeLog(email))
+			s.deny(w, r)
+			return
+		}
 		next(w, r.WithContext(context.WithValue(r.Context(), emailKey, email)))
 	}
 }
@@ -274,7 +302,7 @@ func (s *Server) deny(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.WriteHeader(http.StatusUnauthorized)
-	fmt.Fprint(w, "<!doctype html><meta charset=utf-8><title>Sentinel</title><p style='font:15px system-ui;padding:40px'>401 — sign in via Cloudflare Access (chat.denhafiz.my) first.</p>")
+	fmt.Fprint(w, "<!doctype html><meta charset=utf-8><title>Sentinel</title><p style='font:15px system-ui;padding:40px'>401 — sign in via Cloudflare Access first.</p>")
 }
 
 // ---------- agent worker ----------
@@ -568,14 +596,39 @@ func (s *Server) handleThreadArchive(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{"ok": true})
 }
 
+func (s *Server) stopAndCleanThread(threadID string) {
+	s.mu.Lock()
+	var cancel context.CancelFunc
+	if ar, ok := s.activeRuns[threadID]; ok {
+		cancel = ar.Cancel
+	}
+	if ch, ok := s.threadQueues[threadID]; ok {
+		delete(s.threadQueues, threadID)
+		close(ch)
+	}
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+}
+
 func (s *Server) handleThreadDelete(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ID string `json:"id"`
 	}
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil || !s.store.DeleteThread(req.ID) {
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
 		http.Error(w, "no such thread", http.StatusBadRequest)
 		return
 	}
+	id := req.ID
+	if id == "" {
+		id = s.store.Snapshot().Active
+	}
+	if !s.store.DeleteThread(id) {
+		http.Error(w, "no such thread", http.StatusBadRequest)
+		return
+	}
+	s.stopAndCleanThread(id)
 	s.broadcast("snapshot", s.snapshotPayload())
 	writeJSON(w, map[string]any{"ok": true})
 }
@@ -773,7 +826,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 	tl, msg := s.store.AddUserTo(targetThread, text, files)
 	msgID := s.store.ReserveMsgID()
-	s.broadcast("msg", map[string]any{"thread": tl.ID, "message": msg})
+	s.broadcast("msg", map[string]any{"thread": tl.ID, "title": tl.Title, "message": msg})
 	select {
 	case q <- Job{Thread: tl.ID, MsgID: msgID, Query: composeQuery(tl.ID, text, files)}:
 	default:
@@ -1059,9 +1112,13 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 func main() {
 	addr := envOr("WEBCCHAT_ADDR", "127.0.0.1") + ":" + envOr("WEBCCHAT_PORT", "9121")
 	dataDir = envOr("WEBCCHAT_DATA", filepath.Join(homeDir, "projects", "hermes-webchat", "data"))
-	team := envOr("CF_ACCESS_TEAM", "crimson-violet-aa50")
-	aud := envOr("CF_AUD", "chat.denhafiz.my")
+	team := strings.TrimSpace(os.Getenv("CF_ACCESS_TEAM"))
+	aud := strings.TrimSpace(os.Getenv("CF_AUD"))
 	dev := os.Getenv("WEBCCHAT_DEV") == "1"
+	if !dev && (team == "" || aud == "" || aud == "-") {
+		log.Fatal("sentinel: CF_ACCESS_TEAM and CF_AUD must be set (or set WEBCCHAT_DEV=1 for local dev)")
+	}
+	allowedEmails := parseAllowedEmails(os.Getenv("ALLOWED_EMAILS"))
 
 	uploadDir := filepath.Join(dataDir, "uploads")
 	for _, d := range []string{dataDir, uploadDir} {
@@ -1083,17 +1140,18 @@ func main() {
 
 	shutdownCh := make(chan struct{})
 	srv := &Server{
-		store:        store,
-		hub:          NewHub(),
-		auth:         NewAccessAuth(team, aud),
-		dev:          dev,
-		uploadDir:    uploadDir,
-		injectToken:  injectToken,
-		notifier:     newNotifier(),
-		jobs:         make(chan Job, 16),
-		threadQueues: map[string]chan Job{},
-		activeRuns:   map[string]*ThreadRun{},
-		shutdownCh:   shutdownCh,
+		store:         store,
+		hub:           NewHub(),
+		auth:          NewAccessAuth(team, aud),
+		allowedEmails: allowedEmails,
+		dev:           dev,
+		uploadDir:     uploadDir,
+		injectToken:   injectToken,
+		notifier:      newNotifier(),
+		jobs:          make(chan Job, 16),
+		threadQueues:  map[string]chan Job{},
+		activeRuns:    map[string]*ThreadRun{},
+		shutdownCh:    shutdownCh,
 	}
 	sigCtx, stopSig := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopSig()

@@ -42,6 +42,8 @@ body{font:15px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica
 .thread .tt{font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;display:flex;align-items:center;gap:5px}
 .thread.active .tt{color:white;font-weight:600}
 .thread .pin-ic{font-size:11px;flex-shrink:0}
+.thread .unread-dot{width:8px;height:8px;border-radius:50%;background:var(--accent);flex-shrink:0}
+.thread.unread .tt{color:#fff;font-weight:600}
 .thread .ts{font-size:11px;color:var(--dim);margin-top:2px}
 .thread-act{opacity:0;background:none;border:none;color:var(--dim);cursor:pointer;padding:2px 6px;border-radius:6px;font-size:15px;line-height:1;flex-shrink:0}
 .thread:hover .thread-act,.thread.active .thread-act,.thread-act.open{opacity:1}
@@ -111,6 +113,13 @@ header h1{font-size:16px;font-weight:600}
 main.drop-active::after{content:"Drop files to attach";position:absolute;inset:12px;border:2px dashed var(--accent);border-radius:14px;background:rgba(14,15,17,.82);display:flex;align-items:center;justify-content:center;font-size:16px;font-weight:600;color:var(--accent);z-index:25;pointer-events:none}
 .bubble .h{font-weight:700;margin:8px 0 3px}
 .bubble .li{margin:2px 0 2px 6px}
+.bubble blockquote{border-left:3px solid var(--accent);padding:3px 10px;margin:6px 0;color:#c7ccd4;background:rgba(255,255,255,.03);border-radius:0 6px 6px 0}
+.bubble .md-table-wrap{overflow-x:auto;margin:7px 0;border:1px solid var(--line);border-radius:8px}
+.bubble table.md-table{border-collapse:collapse;width:100%;font-size:13px;background:#0d0e11}
+.bubble table.md-table th,.bubble table.md-table td{padding:6px 10px;border-bottom:1px solid var(--line);border-right:1px solid var(--line);text-align:left;vertical-align:top}
+.bubble table.md-table th{background:#15171c;font-weight:600;color:#fff}
+.bubble table.md-table tr:last-child td{border-bottom:none}
+.bubble table.md-table th:last-child,.bubble table.md-table td:last-child{border-right:none}
 .bubble a{color:var(--accent)}
 .bubble code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:13px;background:#0b0c0e;padding:1px 5px;border-radius:5px}
 /* code blocks */
@@ -463,6 +472,16 @@ const isNarrow = () => innerWidth <= 860;
 const msgs = $('#msgs');
 let S = {threads:[], active:null, running:false, runningThread:null, runningThreads:{}, runningMsgId:0, activities:[], queued:0};
 let clientThread = localStorage.getItem('sentinel_thread') || '';
+let seenMsgs = (() => { try { return JSON.parse(localStorage.getItem('sentinel_seen_msgs') || '{}') || {}; } catch(_) { return {}; } })();
+let seenInit = localStorage.getItem('sentinel_seen_msgs') !== null;
+function saveSeen(){ try { localStorage.setItem('sentinel_seen_msgs', JSON.stringify(seenMsgs)); } catch(_) {} }
+function markThreadSeen(tid, msgId){
+  if(!tid || !msgId) return;
+  if((seenMsgs[tid] || 0) < msgId){ seenMsgs[tid] = msgId; saveSeen(); }
+}
+function isThreadUnread(t){
+  return t && t.id !== S.active && (t.lastMsgId || 0) > (seenMsgs[t.id] || 0);
+}
 let commands = [];
 let appVersion = '';
 let changelogData = [];
@@ -540,20 +559,74 @@ function renderMD(src){
   let out = '';
   for(let i=0;i<parts.length;i++){
     if(i%2===1){ out += renderCodeBlock(parts[i]); }
-    else { out += inlineMD(parts[i]); }
+    else { out += blockMD(parts[i]); }
   }
   return out || '<br>';
 }
-function inlineMD(t){
-  t = esc(t);
-  t = t.replace(/`([^`\n]+)`/g,'<code>$1</code>');
-  t = t.replace(/\*\*([^*\n]+)\*\*/g,'<b>$1</b>');
-  t = t.replace(/(^|\s)(https?:\/\/[^\s<)]+)/g,'$1<a href="$2" target="_blank" rel="noopener">$2</a>');
-  t = t.replace(/^### (.*)$/gm,'<div class="h">$1</div>');
-  t = t.replace(/^##? (.*)$/gm,'<div class="h">$1</div>');
-  t = t.replace(/^\s*[-*] (.*)$/gm,'<div class="li">• $1</div>');
-  t = t.replace(/\n/g,'<br>');
-  return t;
+function inlineFormat(s){
+  const codeToks = [];
+  s = s.replace(/`([^`\n]+)`/g, (_,c) => { codeToks.push('<code>'+c+'</code>'); return '\x01'+(codeToks.length-1)+'\x01'; });
+  s = s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, '<b>$1</b>');
+  s = s.replace(/(^|[^\w*])\*([^*\n]+)\*(?=[^\w*]|$)/g, '$1<em>$2</em>');
+  s = s.replace(/(^|\s)(https?:\/\/[^\s<)]+)/g, '$1<a href="$2" target="_blank" rel="noopener">$2</a>');
+  return s.replace(/\x01(\d+)\x01/g, (_,i) => codeToks[i]);
+}
+function parseTableRow(line){
+  let s = line.trim();
+  if(s.startsWith('|')) s = s.slice(1);
+  if(s.endsWith('|')) s = s.slice(0, -1);
+  return s.split('|').map(c => c.trim());
+}
+function isTableSep(line){
+  const cells = parseTableRow(line);
+  return cells.length > 0 && cells.every(c => /^:?-{3,}:?$/.test(c));
+}
+function blockMD(raw){
+  const lines = esc(raw).split('\n');
+  const out = [];
+  let i = 0;
+  while(i < lines.length){
+    const line = lines[i];
+    // Markdown table: header line with | followed by separator row | --- |
+    if(line.includes('|') && i + 1 < lines.length && lines[i+1].includes('|') && isTableSep(lines[i+1])){
+      const hdr = parseTableRow(line);
+      i += 2;
+      const rows = [];
+      while(i < lines.length && lines[i].includes('|') && lines[i].trim() !== ''){
+        rows.push(parseTableRow(lines[i]));
+        i++;
+      }
+      let tbl = '<div class="md-table-wrap"><table class="md-table"><thead><tr>' +
+        hdr.map(c => '<th>'+inlineFormat(c)+'</th>').join('') +
+        '</tr></thead><tbody>' +
+        rows.map(r => '<tr>'+hdr.map((_,ci)=>'<td>'+inlineFormat(r[ci]||'')+'</td>').join('')+'</tr>').join('') +
+        '</tbody></table></div>';
+      out.push(tbl);
+      continue;
+    }
+    // Blockquote: consecutive lines starting with &gt;
+    if(/^\s*&gt;\s?/.test(line)){
+      const q = [];
+      while(i < lines.length && /^\s*&gt;\s?/.test(lines[i])){
+        q.push(inlineFormat(lines[i].replace(/^\s*&gt;\s?/, '')));
+        i++;
+      }
+      out.push('<blockquote>'+q.join('<br>')+'</blockquote>');
+      continue;
+    }
+    if(/^### (.*)$/.test(line)){
+      out.push('<div class="h">'+inlineFormat(line.slice(4))+'</div>');
+    } else if(/^##? (.*)$/.test(line)){
+      out.push('<div class="h">'+inlineFormat(line.replace(/^##? /, ''))+'</div>');
+    } else if(/^\s*[-*] (.*)$/.test(line)){
+      out.push('<div class="li">• '+inlineFormat(line.replace(/^\s*[-*] /, ''))+'</div>');
+    } else {
+      out.push(inlineFormat(line));
+    }
+    i++;
+  }
+  return out.join('<br>').replace(/(<\/div>|<\/blockquote>)<br>/g, '$1');
 }
 
 /* rendering */
@@ -696,9 +769,10 @@ function showThreadMenu(t, btn){
 }
 function threadRow(t){
   const d=document.createElement('div');
-  d.className='thread'+(t.id===S.active?' active':'');
+  const unread = isThreadUnread(t);
+  d.className='thread'+(t.id===S.active?' active':'')+(unread?' unread':'');
   const isBusy = !!(S.runningThreads && S.runningThreads[t.id]);
-  d.innerHTML='<div class="thread-main"><div class="tt">'+(isBusy?'<span class="act-dot" style="flex-shrink:0"></span>':'')+(t.pinned?'<span class="pin-ic">📌</span>':'')+'<span>'+esc(t.title)+'</span></div><div class="ts">'+ago(t.lastTime||t.created)+'</div></div>'+
+  d.innerHTML='<div class="thread-main"><div class="tt">'+(isBusy?'<span class="act-dot" style="flex-shrink:0"></span>':(unread?'<span class="unread-dot" title="Unread messages"></span>':''))+(t.pinned?'<span class="pin-ic">📌</span>':'')+'<span>'+esc(t.title)+'</span></div><div class="ts">'+ago(t.lastTime||t.created)+'</div></div>'+
     '<button class="thread-act" title="Thread actions" aria-label="Thread actions">⋯</button>';
   d.onclick=()=>{ switchThread(t.id); if(isNarrow()) setSidebar(false); };
   d.querySelector('.thread-act').onclick=(e)=>{ e.stopPropagation(); showThreadMenu(t, e.currentTarget); };
@@ -761,7 +835,16 @@ function applySnap(d){
   }
   const wasRunning=S.running;
   S.threads=list; S.active=d.active;
-  if(S.active){ clientThread=S.active; localStorage.setItem('sentinel_thread', clientThread); }
+  if(!seenInit){
+    seenInit = true;
+    for(const t of list){ if(t.lastMsgId) seenMsgs[t.id] = t.lastMsgId; }
+    saveSeen();
+  }
+  if(S.active){
+    clientThread=S.active; localStorage.setItem('sentinel_thread', clientThread);
+    const act = list.find(t=>t.id===S.active);
+    if(act && act.lastMsgId) markThreadSeen(S.active, act.lastMsgId);
+  }
   const rt = {};
   (d.runningThreads||[]).forEach(id=>{ rt[id]=true; });
   if(d.running && d.runningThread) rt[d.runningThread]=true;
@@ -784,16 +867,25 @@ function applySnap(d){
 }
 function onMsg(d){
   delete streamBuf[d.message.id]; delete streamThread[d.message.id];
+  const thr = S.threads.find(t=>t.id===d.thread);
+  if(thr){
+    if(d.message.time) thr.lastTime = d.message.time;
+    if(d.message.id) thr.lastMsgId = d.message.id;
+    if(d.title) thr.title = d.title;
+  }
   if(notifyBg && document.hidden && d.message.role!=='user' && 'Notification' in window && Notification.permission==='granted'){
     try{ new Notification(d.message.role==='error'?'Sentinel Error':'Sentinel Reply', {body:(d.message.text||'').slice(0,120)}); }catch(_){}
   }
-  if(d.thread!==S.active) return;
-  currentMsgs.push(d.message);
-  const nb=bubble(d.message,false);
-  const el=msgs.querySelector('.msg[data-id="'+d.message.id+'"]');
-  if(el) el.replaceWith(nb); else msgs.appendChild(nb);
-  renderEmpty();
-  scrollIfNear(true);
+  if(d.thread===S.active){
+    markThreadSeen(d.thread, d.message.id);
+    currentMsgs.push(d.message);
+    const nb=bubble(d.message,false);
+    const el=msgs.querySelector('.msg[data-id="'+d.message.id+'"]');
+    if(el) el.replaceWith(nb); else msgs.appendChild(nb);
+    renderEmpty();
+    scrollIfNear(true);
+  }
+  renderThreads();
 }
 function onDelta(d){
   // d.text is cumulative (the full reply so far), not a fragment: replace, don't append.

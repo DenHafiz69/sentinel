@@ -383,6 +383,54 @@ func TestClientThreadFileScopeReaperAndExport(t *testing.T) {
 	}
 }
 
+func TestThreadDeleteCancelsRunAndCleansWorker(t *testing.T) {
+	dir := t.TempDir()
+	st := NewStore(dir)
+	thr := st.NewThread()
+	cancelled := false
+
+	srv := &Server{
+		store:        st,
+		hub:          NewHub(),
+		dev:          true,
+		uploadDir:    dir,
+		threadQueues: map[string]chan Job{thr.ID: make(chan Job, 1)},
+		activeRuns:   map[string]*ThreadRun{thr.ID: {Cancel: func() { cancelled = true }}},
+	}
+
+	body, _ := json.Marshal(map[string]any{"id": thr.ID})
+	rec := httptest.NewRecorder()
+	srv.handleThreadDelete(rec, httptest.NewRequest(http.MethodPost, "/api/thread/delete", bytes.NewReader(body)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("delete status = %d", rec.Code)
+	}
+	if !cancelled {
+		t.Fatal("expected active run cancel func to be called on thread delete")
+	}
+	if _, exists := srv.threadQueues[thr.ID]; exists {
+		t.Fatal("expected thread queue to be removed on thread delete")
+	}
+}
+
+func TestAllowedEmailsAndLastMsgID(t *testing.T) {
+	srv := &Server{allowedEmails: parseAllowedEmails("Alice@Example.com, bob@example.com")}
+	if !srv.isEmailAllowed("alice@example.com") || !srv.isEmailAllowed("BOB@example.com") {
+		t.Fatal("expected allowlisted emails to pass case-insensitively")
+	}
+	if srv.isEmailAllowed("eve@example.com") {
+		t.Fatal("expected non-allowlisted email to be rejected")
+	}
+
+	dir := t.TempDir()
+	st := NewStore(dir)
+	thr := st.NewThread()
+	_, msg := st.AddUserTo(thr.ID, "hello unread", nil)
+	snap := st.Snapshot()
+	if len(snap.Threads) != 1 || snap.Threads[0].LastMsgID != msg.ID {
+		t.Fatalf("expected LastMsgID=%d, got %+v", msg.ID, snap.Threads)
+	}
+}
+
 // TestSaveWritesDurableState proves the store's save path leaves a complete,
 // 0600 state.json and no temp residue — the fsync-then-rename contract that
 // keeps every thread across a crash or power cut.

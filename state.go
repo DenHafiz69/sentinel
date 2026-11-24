@@ -51,13 +51,14 @@ type Thread struct {
 }
 
 type ThreadLite struct {
-	ID       string `json:"id"`
-	Title    string `json:"title"`
-	Model    string `json:"model,omitempty"`
-	Pinned   bool   `json:"pinned,omitempty"`
-	Archived bool   `json:"archived,omitempty"`
-	Created  int64  `json:"created"`
-	LastTime int64  `json:"lastTime"`
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Model     string `json:"model,omitempty"`
+	Pinned    bool   `json:"pinned,omitempty"`
+	Archived  bool   `json:"archived,omitempty"`
+	Created   int64  `json:"created"`
+	LastTime  int64  `json:"lastTime"`
+	LastMsgID int64  `json:"lastMsgId,omitempty"`
 }
 
 type SearchHit struct {
@@ -167,17 +168,21 @@ func writeSynced(path string, b []byte, mode os.FileMode) error {
 
 func lite(t *Thread) ThreadLite {
 	lt := t.Created
+	var lastMsgID int64
 	if len(t.Messages) > 0 {
-		lt = t.Messages[len(t.Messages)-1].Time
+		last := t.Messages[len(t.Messages)-1]
+		lt = last.Time
+		lastMsgID = last.ID
 	}
 	return ThreadLite{
-		ID:       t.ID,
-		Title:    t.Title,
-		Model:    t.Model,
-		Pinned:   t.Pinned,
-		Archived: t.Archived,
-		Created:  t.Created,
-		LastTime: lt,
+		ID:        t.ID,
+		Title:     t.Title,
+		Model:     t.Model,
+		Pinned:    t.Pinned,
+		Archived:  t.Archived,
+		Created:   t.Created,
+		LastTime:  lt,
+		LastMsgID: lastMsgID,
 	}
 }
 

@@ -158,24 +158,25 @@ func (a *AccessAuth) Validate(token string) (string, error) {
 	if strings.TrimSuffix(claims.Iss, "/") != wantIss {
 		return "", fmt.Errorf("unexpected issuer %q", claims.Iss)
 	}
-	if a.aud != "" && a.aud != "-" {
-		var auds []string
-		if err := json.Unmarshal(claims.Aud, &auds); err != nil {
-			var one string
-			if err2 := json.Unmarshal(claims.Aud, &one); err2 == nil && one != "" {
-				auds = []string{one}
-			}
+	if a.aud == "" || a.aud == "-" {
+		return "", errors.New("missing access AUD configuration")
+	}
+	var auds []string
+	if err := json.Unmarshal(claims.Aud, &auds); err != nil {
+		var one string
+		if err2 := json.Unmarshal(claims.Aud, &one); err2 == nil && one != "" {
+			auds = []string{one}
 		}
-		ok := false
-		for _, x := range auds {
-			if x == a.aud {
-				ok = true
-				break
-			}
+	}
+	ok := false
+	for _, x := range auds {
+		if x == a.aud {
+			ok = true
+			break
 		}
-		if !ok {
-			return "", fmt.Errorf("token aud %v does not match %q", auds, a.aud)
-		}
+	}
+	if !ok {
+		return "", fmt.Errorf("token aud %v does not match %q", auds, a.aud)
 	}
 	if claims.Exp > 0 && time.Now().Add(-time.Minute).After(time.Unix(int64(claims.Exp), 0)) {
 		return "", errors.New("token expired")
