@@ -3,7 +3,7 @@ package main
 import "net/http"
 
 // Version can be overridden at build time via -ldflags "-X main.Version=x.y.z".
-var Version = "0.2.7"
+var Version = "0.2.8"
 
 type ChangelogEntry struct {
 	Version string   `json:"version"`
@@ -13,6 +13,17 @@ type ChangelogEntry struct {
 }
 
 var changelog = []ChangelogEntry{
+	{
+		Version: "0.2.8",
+		Date:    "2026-11-25",
+		Title:   "Crash-Safe Saves, Instant Restarts & Coalesced Streaming",
+		Items: []string{
+			"state.json is written, fsynced, and the directory synced around the rename, so a power cut cannot leave it truncated",
+			"Shutdown closes open SSE streams instead of waiting out its grace period: restarts with a tab open are instant and no longer log 'context deadline exceeded'",
+			"Telegram failure alerts carry the tail of the partial reply, so you can see how far a dead run got without opening the chat",
+			"Streaming sends the full text so far at most every 250ms instead of an event per token; a dropped event is healed by the next one",
+		},
+	},
 	{
 		Version: "0.2.7",
 		Date:    "2026-11-21",
